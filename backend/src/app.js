@@ -1,0 +1,76 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import session from 'express-session';
+import passport from 'passport';
+
+import { config } from './config/index.js';
+import { connectDB } from './config/database.js';
+import { configurePassport } from './config/passport.js';
+import { startPolling } from './services/pollerService.js';
+
+// Route imports
+import authRoutes from './routes/auth.js';
+import accountRoutes from './routes/accounts.js';
+import emailRoutes from './routes/emails.js';
+import eventRoutes from './routes/events.js';
+import settingRoutes from './routes/settings.js';
+
+const app = express();
+
+// Middleware
+app.use(helmet());
+app.use(cors({ 
+  origin: [config.frontendUrl, 'http://localhost:5173', 'http://127.0.0.1:5173'].filter(Boolean), 
+  credentials: true 
+}));
+app.use(express.json());
+app.use(morgan(config.nodeEnv === 'development' ? 'dev' : 'combined'));
+
+app.use(
+  session({
+    secret: config.sessionSecret,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: config.nodeEnv === 'production',
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    },
+  })
+);
+
+// Initialize Passport
+configurePassport();
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/accounts', accountRoutes);
+app.use('/api/emails', emailRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/settings', settingRoutes);
+
+// Health check route
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Start Server
+const startServer = async () => {
+  // Connect to Database
+  await connectDB();
+
+  app.listen(config.port, () => {
+    console.log(`Server running in ${config.nodeEnv} mode on port ${config.port}`);
+    
+    // Start polling service
+    console.log('Starting polling service...');
+    startPolling();
+  });
+};
+
+startServer();

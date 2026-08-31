@@ -1,0 +1,26 @@
+{
+  "name": "email-notification-automation-backend",
+  "version": "1.0.0",
+  "description": "Backend for Email Notification to Google Calendar Automation",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "node --watch src/app.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "cors": "^2.8.5",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "express-session": "^1.18.0",
+    "googleapis": "^133.0.0",
+    "helmet": "^7.1.0",
+    "mongoose": "^8.1.1",
+    "morgan": "^1.10.0",
+    "node-cron": "^3.0.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0"
+  }
+}
