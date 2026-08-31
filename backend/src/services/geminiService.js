@@ -9,7 +9,7 @@ import { config } from '../config/index.js';
 const callGemini = async (prompt, retries = 2, delayMs = 2500) => {
     try {
         const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         
         const fullPrompt = `You are an AI assistant specialized in parsing emails to extract calendar events.
 Respond ONLY with a valid JSON object matching this schema. Do not add markdown code blocks or commentary:
@@ -32,6 +32,13 @@ Actions:
 - RESCHEDULE: An existing event is being modified.
 - CANCEL: An existing event is being cancelled.
 - NO_EVENT: No clear event information found.
+
+Extraction Guidelines:
+- "title": Extract the full, clean name of the event or class (e.g., "Maths Class", "Team Standup"). Do not truncate or drop any initial letters.
+- "date": Date in YYYY-MM-DD format. Infer the upcoming/current year if year is omitted.
+- "startTime": 24-hour format HH:MM representing the exact local time stated in the email (e.g., "19:30" for 7:30 PM, "09:00" for 9:00 AM). Do NOT convert to UTC.
+- "endTime": 24-hour format HH:MM. If omitted or not mentioned, provide 1 hour after startTime.
+- "location": Physical location, room number, or meeting link (Zoom/Meet/Teams) if present.
 
 ${prompt}`;
 

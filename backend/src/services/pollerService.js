@@ -149,27 +149,34 @@ export const pollAccount = async (account) => {
         }
 
         if (aiResponse.action === 'CREATE' && aiResponse.event) {
-          const { start: startDateTime, end: endDateTime } = parseEventDates(aiResponse.event);
+          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(aiResponse.event);
 
           let calendarEventId = null;
+          let eventStart = fallbackStart;
+          let eventEnd = fallbackEnd;
+
           // Auto-add to Google Calendar only if autoAdd setting is not false
           if (user.settings?.autoAdd !== false) {
-            calendarEventId = await createEvent(user, {
+            const calendarResult = await createEvent(user, {
               ...aiResponse.event,
-              startTime: startDateTime.toISOString(),
-              endTime: endDateTime.toISOString()
+              date: aiResponse.event.date,
+              startTime: aiResponse.event.startTime,
+              endTime: aiResponse.event.endTime
             });
+            calendarEventId = calendarResult?.id || calendarResult;
+            if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
+            if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
           }
 
           const newEvent = new Event({
             userId: user._id,
             threadId: processedThread?._id,
-            calendarEventId,
+            calendarEventId: calendarEventId ? String(calendarEventId) : null,
             title: aiResponse.event.title || 'Scheduled Event',
             description: aiResponse.event.description || '',
             location: aiResponse.event.location || '',
-            startTime: startDateTime,
-            endTime: endDateTime,
+            startTime: eventStart,
+            endTime: eventEnd,
             status: 'scheduled',
             history: [{
               action: 'created',
@@ -200,13 +207,20 @@ export const pollAccount = async (account) => {
           console.log(`Created event ${calendarEventId} for thread ${threadId}`);
 
         } else if (aiResponse.action === 'RESCHEDULE' && existingEvent && aiResponse.event) {
-          const { start: startDateTime, end: endDateTime } = parseEventDates(aiResponse.event);
+          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(aiResponse.event);
+          let eventStart = fallbackStart;
+          let eventEnd = fallbackEnd;
 
-          await updateEvent(user, existingEvent.calendarEventId, {
-            ...aiResponse.event,
-            startTime: startDateTime.toISOString(),
-            endTime: endDateTime.toISOString()
-          });
+          if (existingEvent.calendarEventId) {
+            const calendarResult = await updateEvent(user, existingEvent.calendarEventId, {
+              ...aiResponse.event,
+              date: aiResponse.event.date,
+              startTime: aiResponse.event.startTime,
+              endTime: aiResponse.event.endTime
+            });
+            if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
+            if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
+          }
 
           existingEvent.history.push({
             action: 'rescheduled',
@@ -216,8 +230,8 @@ export const pollAccount = async (account) => {
             triggerEmailId: msg.id
           });
           existingEvent.title = aiResponse.event.title || existingEvent.title;
-          existingEvent.startTime = startDateTime;
-          existingEvent.endTime = endDateTime;
+          existingEvent.startTime = eventStart;
+          existingEvent.endTime = eventEnd;
           existingEvent.location = aiResponse.event.location || existingEvent.location;
           existingEvent.status = 'rescheduled';
           await existingEvent.save();

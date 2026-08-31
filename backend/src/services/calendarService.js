@@ -28,18 +28,35 @@ export const getCalendarClient = async (user) => {
 };
 
 /**
- * Format date and time to ISO strings suitable for Google Calendar API
+ * Fetch the primary calendar timezone for the user
+ * @param {import('googleapis').calendar_v3.Calendar} calendar
+ * @returns {Promise<string>} Timezone string e.g. 'Asia/Kolkata' or 'UTC'
+ */
+export const getUserTimeZone = async (calendar) => {
+    try {
+        const res = await calendar.calendars.get({ calendarId: 'primary' });
+        return res.data?.timeZone || 'UTC';
+    } catch (err) {
+        console.warn('Could not fetch calendar timezone, defaulting to UTC:', err?.message);
+        return 'UTC';
+    }
+};
+
+/**
+ * Format date and time to strings suitable for Google Calendar API with timezone support
  * @param {string} [dateStr] - YYYY-MM-DD
  * @param {string|Date} [timeOrDate] - HH:MM, HH:MM:SS or Date object / ISO string
+ * @param {string} [timeZone] - User timezone (e.g. 'Asia/Kolkata')
  * @returns {Object} Start/end object for Google Calendar
  */
-const formatEventTime = (dateStr, timeOrDate) => {
+export const formatEventTime = (dateStr, timeOrDate, timeZone = null) => {
     if (timeOrDate instanceof Date) {
         return { dateTime: isNaN(timeOrDate.getTime()) ? new Date().toISOString() : timeOrDate.toISOString() };
     }
     if (typeof timeOrDate === 'string') {
         const trimmed = timeOrDate.trim();
-        if (trimmed.includes('T') || trimmed.endsWith('Z')) {
+        // If already a full ISO string with timezone offset or UTC Z
+        if (trimmed.includes('T') && (trimmed.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(trimmed))) {
             const parsed = new Date(trimmed);
             if (!isNaN(parsed.getTime())) return { dateTime: parsed.toISOString() };
         }
@@ -53,17 +70,24 @@ const formatEventTime = (dateStr, timeOrDate) => {
         if (match) {
             let hours = parseInt(match[1], 10);
             const minutes = parseInt(match[2], 10);
+            const seconds = match[3] ? parseInt(match[3], 10) : 0;
             const ampm = match[4]?.toLowerCase();
             if (ampm === 'pm' && hours < 12) hours += 12;
             if (ampm === 'am' && hours === 12) hours = 0;
 
-            const d = new Date(`${baseDate}T00:00:00`);
-            d.setHours(hours, minutes, 0, 0);
-            if (!isNaN(d.getTime())) return { dateTime: d.toISOString() };
+            const timeFormatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            const localIso = `${baseDate}T${timeFormatted}`;
+            return timeZone ? { dateTime: localIso, timeZone } : { dateTime: localIso };
+        }
+
+        if (trimmed.includes('T')) {
+            return timeZone ? { dateTime: trimmed, timeZone } : { dateTime: trimmed };
         }
 
         const direct = new Date(`${baseDate}T${trimmed}`);
-        if (!isNaN(direct.getTime())) return { dateTime: direct.toISOString() };
+        if (!isNaN(direct.getTime())) {
+            return timeZone ? { dateTime: `${baseDate}T${trimmed}`, timeZone } : { dateTime: direct.toISOString() };
+        }
     }
     if (dateStr && !timeOrDate) {
         return { date: dateStr }; // All-day event
@@ -75,10 +99,11 @@ const formatEventTime = (dateStr, timeOrDate) => {
  * Creates a Google Calendar event
  * @param {Object} user - User document
  * @param {Object} eventData - { title, description, location, startTime, endTime, date }
- * @returns {Promise<string>} calendarEventId
+ * @returns {Promise<Object>} { id, startDateTime, endDateTime, timeZone }
  */
 export const createEvent = async (user, eventData) => {
     const calendar = await getCalendarClient(user);
+    const timeZone = await getUserTimeZone(calendar);
     
     let startTime = eventData.startTime;
     let endTime = eventData.endTime;
@@ -97,15 +122,17 @@ export const createEvent = async (user, eventData) => {
         }
     }
 
-    const start = formatEventTime(eventData.date, startTime);
-    const end = formatEventTime(eventData.date, endTime || startTime);
+    const start = formatEventTime(eventData.date, startTime, timeZone);
+    const end = formatEventTime(eventData.date, endTime || startTime, timeZone);
 
     // Google Calendar API requires start and end to both have dateTime or both have date
     if (start.dateTime && !end.dateTime) {
-        end.dateTime = new Date(new Date(start.dateTime).getTime() + 60 * 60 * 1000).toISOString();
+        end.dateTime = start.dateTime;
+        if (timeZone) end.timeZone = timeZone;
         delete end.date;
     } else if (!start.dateTime && end.dateTime) {
-        start.dateTime = new Date(new Date(end.dateTime).getTime() - 60 * 60 * 1000).toISOString();
+        start.dateTime = end.dateTime;
+        if (timeZone) start.timeZone = timeZone;
         delete start.date;
     }
 
@@ -129,7 +156,15 @@ export const createEvent = async (user, eventData) => {
             calendarId: 'primary',
             resource: event,
         });
-        return response.data.id;
+        const created = response.data;
+        const result = {
+            id: created.id,
+            startDateTime: created.start?.dateTime ? new Date(created.start.dateTime) : null,
+            endDateTime: created.end?.dateTime ? new Date(created.end.dateTime) : null,
+            timeZone: created.start?.timeZone || timeZone,
+            toString: () => created.id
+        };
+        return result;
     } catch (error) {
         console.error('Error creating calendar event:', error);
         throw error;
@@ -145,6 +180,7 @@ export const createEvent = async (user, eventData) => {
  */
 export const updateEvent = async (user, calendarEventId, eventData) => {
     const calendar = await getCalendarClient(user);
+    const timeZone = await getUserTimeZone(calendar);
     
     let startTime = eventData.startTime;
     let endTime = eventData.endTime;
@@ -162,14 +198,16 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
         }
     }
 
-    const start = formatEventTime(eventData.date, startTime);
-    const end = formatEventTime(eventData.date, endTime || startTime);
+    const start = formatEventTime(eventData.date, startTime, timeZone);
+    const end = formatEventTime(eventData.date, endTime || startTime, timeZone);
 
     if (start.dateTime && !end.dateTime) {
-        end.dateTime = new Date(new Date(start.dateTime).getTime() + 60 * 60 * 1000).toISOString();
+        end.dateTime = start.dateTime;
+        if (timeZone) end.timeZone = timeZone;
         delete end.date;
     } else if (!start.dateTime && end.dateTime) {
-        start.dateTime = new Date(new Date(end.dateTime).getTime() - 60 * 60 * 1000).toISOString();
+        start.dateTime = end.dateTime;
+        if (timeZone) start.timeZone = timeZone;
         delete start.date;
     }
 
@@ -194,7 +232,15 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
             eventId: calendarEventId,
             resource: event,
         });
-        return response.data;
+        const updated = response.data;
+        return {
+            id: updated.id,
+            startDateTime: updated.start?.dateTime ? new Date(updated.start.dateTime) : null,
+            endDateTime: updated.end?.dateTime ? new Date(updated.end.dateTime) : null,
+            timeZone: updated.start?.timeZone || timeZone,
+            data: updated,
+            toString: () => updated.id
+        };
     } catch (error) {
         console.error(`Error updating calendar event ${calendarEventId}:`, error);
         throw error;
@@ -219,3 +265,4 @@ export const deleteEvent = async (user, calendarEventId) => {
         throw error;
     }
 };
+
