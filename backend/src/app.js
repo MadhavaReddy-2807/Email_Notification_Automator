@@ -19,6 +19,11 @@ import settingRoutes from './routes/settings.js';
 
 const app = express();
 
+// Trust reverse proxy in production (Render, Heroku, AWS load balancers)
+if (config.nodeEnv === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Middleware
 app.use(helmet());
 app.use(cors({ 
@@ -36,7 +41,7 @@ app.use(
     cookie: {
       secure: config.nodeEnv === 'production',
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: config.nodeEnv === 'production' ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000 // 1 day
     },
   })
