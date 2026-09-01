@@ -273,7 +273,7 @@ const Events = () => {
                           {evt.status !== 'cancelled' && (
                             <button
                               className="btn btn-sm btn-outline-danger"
-                              onClick={() => handleDelete(evt._id)}
+                              onClick={() => handleDeleteEvent(evt._id)}
                               title="Cancel Event"
                             >
                               <FiTrash2 />
@@ -325,7 +325,7 @@ const Events = () => {
                 </button>
               </div>
 
-              <form onSubmit={handleUpdate}>
+              <form onSubmit={handleUpdateEvent}>
                 <div className="modal-body">
                   <div className="form-group">
                     <label>Event Title</label>
