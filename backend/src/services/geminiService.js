@@ -83,11 +83,12 @@ ${prompt}`;
 
                 return parsed;
             } catch (error) {
+                const errorDetail = error.status ? `[Status ${error.status}] ${error.message}` : error.message;
                 if (error.message?.includes('429') || error.status === 429) {
                     console.warn(`Model ${modelName} hit rate limit on attempt ${attempt + 1}. Waiting 3s...`);
                     await new Promise(r => setTimeout(r, 3000));
                 } else {
-                    console.warn(`Model ${modelName} error: ${error.message?.substring(0, 100)}`);
+                    console.warn(`Model ${modelName} error: ${errorDetail}`);
                     break;
                 }
             }
@@ -192,7 +193,7 @@ Respond ONLY with a JSON object:
             const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
             return JSON.parse(cleaned);
         } catch (error) {
-            console.warn(`Duplicate check on model ${modelName} failed: ${error.message?.substring(0, 80)}. Trying fallback...`);
+            console.warn(`Duplicate check on model ${modelName} failed: ${error.message}. Trying fallback...`);
         }
     }
 
