@@ -96,10 +96,16 @@ ${prompt}`;
 
                 return parsed;
             } catch (error) {
+                const isRateLimit = error.message?.includes('429') || error.status === 429;
+                const isServiceBusy = error.message?.includes('503') || error.status === 503;
                 const errorDetail = error.status ? `[Status ${error.status}] ${error.message}` : error.message;
-                if (error.message?.includes('429') || error.status === 429) {
+
+                if (isRateLimit) {
                     console.warn(`Model ${modelName} hit rate limit on attempt ${attempt + 1}. Waiting 3s...`);
                     await new Promise(r => setTimeout(r, 3000));
+                } else if (isServiceBusy) {
+                    console.warn(`Model ${modelName} is temporarily busy (503). Switching to fallback model...`);
+                    break; // Immediately move to next available model without burning attempt
                 } else {
                     console.warn(`Model ${modelName} error: ${errorDetail}`);
                     break;

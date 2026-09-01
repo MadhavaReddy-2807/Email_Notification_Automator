@@ -285,8 +285,8 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           continue; // Bypasses expensive Gemini API call
         }
 
-        // Small rate limit delay between AI calls
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Throttle delay between AI calls to stay under Google Free Tier 15 RPM limit
+        await new Promise(resolve => setTimeout(resolve, 2500));
 
         let aiResponse;
         if (processedThread) {
@@ -648,20 +648,16 @@ export const cleanupPastEvents = async (userId = null, daysOld = 0) => {
 
 /**
  * Starts the cron jobs:
- * 1. Polls all active accounts every 2 minutes.
- * 2. Parallel background cleanup of past events every 30 minutes.
+ * 1. Polls all active accounts every 2 minutes for new incoming emails.
+ * 2. Auto-clean past events once a day at midnight (00:00).
  */
 export const startPolling = () => {
-  console.log('Starting poller & parallel background services...');
+  console.log('Starting poller & background services...');
 
-  // Run initial parallel cleanup on boot
-  cleanupPastEvents(null, 0).catch(err => console.error('Initial cleanup error:', err));
-
-  // Cron 1: Poll inboxes every 2 minutes & automatically cleanup expired events
+  // Cron 1: Poll inboxes for new emails every 2 minutes
   cron.schedule('*/2 * * * *', async () => {
-    console.log('Cron triggered: Polling all active accounts and auto-cleaning past events');
+    console.log('Cron triggered: Polling all active Gmail accounts for new emails...');
     try {
-      await cleanupPastEvents(null, 0);
       const accounts = await GmailAccount.find({ isActive: true });
       for (const account of accounts) {
         await pollAccount(account, false);
@@ -671,9 +667,9 @@ export const startPolling = () => {
     }
   });
 
-  // Cron 2: Parallel cleanup of past events every 30 minutes
-  cron.schedule('*/30 * * * *', async () => {
-    console.log('[Cleanup Job] Running periodic past event cleanup...');
+  // Cron 2: Auto-clean past events once a day at midnight (00:00)
+  cron.schedule('0 0 * * *', async () => {
+    console.log('[Daily Cleanup Job] Running once-a-day past event auto-clean (midnight)...');
     await cleanupPastEvents(null, 0);
   });
 };
