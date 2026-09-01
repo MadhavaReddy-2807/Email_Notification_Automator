@@ -34,8 +34,9 @@ const extractJson = (rawText) => {
       try {
         return JSON.parse(jsonCandidate);
       } catch (e2) {
-        // 3. Clean up trailing commas, unquoted keys, or malformed newlines inside candidate
+        // 3. Clean up ellipses (...), trailing commas, unquoted keys, or malformed newlines
         const cleanedCandidate = jsonCandidate
+          .replace(/\.\.\./g, '') // remove LLM ellipses
           .replace(/,\s*([\}\]])/g, '$1') // remove trailing commas
           .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '') // strip comments
           .trim();
@@ -94,7 +95,11 @@ ${prompt}`;
     for (const modelName of FALLBACK_MODELS) {
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                const model = genAI.getGenerativeModel({ model: modelName });
+                const isGemini = modelName.startsWith('gemini-');
+                const model = genAI.getGenerativeModel({ 
+                    model: modelName,
+                    generationConfig: isGemini ? { responseMimeType: 'application/json' } : undefined
+                });
                 const result = await model.generateContent(fullPrompt);
                 const rawText = result.response.text();
                 const parsed = extractJson(rawText);
