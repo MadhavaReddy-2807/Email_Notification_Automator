@@ -159,28 +159,31 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           : null;
 
         let aiResponse;
+        let parsedSubject = '';
         if (processedThread) {
-          console.log(`Thread ${threadId} seen before. Fetching full thread context.`);
+          console.log(`[Poller] Thread ${threadId} seen before. Fetching full thread context.`);
           const threadData = await getThread(gmailClient, threadId);
           const parsedMessages = (threadData.messages || []).map(parseEmailContent);
+          parsedSubject = parsedMessages[0]?.subject || 'No Subject';
           aiResponse = await analyzeThread(parsedMessages, existingEvent || null);
         } else {
-          console.log(`New thread ${threadId}. Fetching message.`);
           const messageData = await getMessage(gmailClient, msg.id);
           const parsedMessage = parseEmailContent(messageData);
+          parsedSubject = parsedMessage.subject || 'No Subject';
+          console.log(`[Poller] Analyzing email: "${parsedSubject}" from "${parsedMessage.from}" (Date: ${parsedMessage.date})`);
           aiResponse = await analyzeEmail(parsedMessage, null);
-        }
-
-        console.log(`AI Action: ${aiResponse.action} (Confidence: ${aiResponse.confidence})`);
-
-        if (aiResponse.confidence < 0.4) {
-          console.log(`Low confidence (${aiResponse.confidence}), skipping action.`);
-          continue;
         }
 
         const eventsToProcess = (aiResponse.events && aiResponse.events.length > 0)
           ? aiResponse.events
           : (aiResponse.event ? [aiResponse.event] : []);
+
+        console.log(`[Poller] AI Action: ${aiResponse.action} (Confidence: ${aiResponse.confidence}), Extracted Events: ${eventsToProcess.length}`);
+
+        if (aiResponse.confidence < 0.4) {
+          console.log(`[Poller] Low confidence (${aiResponse.confidence}) for "${parsedSubject}", skipping.`);
+          continue;
+        }
 
         if (aiResponse.action === 'CREATE' && eventsToProcess.length > 0) {
           let lastCreatedEventId = null;
@@ -206,7 +209,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
             const dupCheck = await checkIsDuplicateWithGemini(eventItem, combinedExisting);
             if (dupCheck.isDuplicate) {
-              console.log(`Duplicate event detected for "${eventItem.title}" on ${checkDate}: ${dupCheck.reasoning}. Skipping duplicate.`);
+              console.log(`[Poller] Duplicate event detected for "${eventItem.title}" on ${checkDate}: ${dupCheck.reasoning}. Skipping duplicate.`);
               continue;
             }
 
@@ -247,7 +250,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
             lastCreatedEventId = newEvent._id;
             createdEventsCount += 1;
 
-            console.log(`Created event "${newEvent.title}" (${calendarEventId}) for thread ${threadId}`);
+            console.log(`[Poller] Successfully created event "${newEvent.title}" (${calendarEventId}) on ${eventStart}`);
           }
 
           // Create or update ProcessedThread record
@@ -260,7 +263,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
               messageCount: 1,
               linkedEvent: lastCreatedEventId,
               status: 'active',
-              threadSnippet: eventsToProcess[0]?.title || 'Calendar Event'
+              threadSnippet: eventsToProcess[0]?.title || parsedSubject || 'Calendar Event'
             });
             await newThreadRecord.save();
           } else {
@@ -307,7 +310,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
             processedThread.lastProcessedAt = new Date();
             await processedThread.save();
           }
-          console.log(`Updated event ${existingEvent.calendarEventId}`);
+          console.log(`[Poller] Rescheduled event ${existingEvent.calendarEventId}`);
 
         } else if (aiResponse.action === 'CANCEL' && existingEvent) {
           if (existingEvent.calendarEventId) {
@@ -329,10 +332,10 @@ export const pollAccount = async (account, fullInboxScan = false) => {
             processedThread.lastProcessedAt = new Date();
             await processedThread.save();
           }
-          console.log(`Cancelled event ${existingEvent.calendarEventId}`);
+          console.log(`[Poller] Cancelled event ${existingEvent.calendarEventId}`);
 
         } else if (aiResponse.action === 'NO_EVENT') {
-          console.log(`No event detected for thread ${threadId}`);
+          console.log(`[Poller] No event detected for thread ${threadId} ("${parsedSubject}")`);
           if (processedThread) {
             processedThread.lastMessageId = msg.id;
             processedThread.lastProcessedAt = new Date();
@@ -340,7 +343,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           }
         }
       } catch (err) {
-        console.error(`Error processing message ${msg.id}:`, err);
+        console.error(`[Poller] Error processing message ${msg.id}:`, err);
       }
     }
 
@@ -359,16 +362,26 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 /**
  * Manually scans all active inboxes for a given user
  * @param {string} userId 
- * @returns {Promise<{ success: boolean, createdEvents: number }>}
+ * @returns {Promise<{ success: boolean, createdEvents: number, message: string }>}
  */
 export const scanUserInboxes = async (userId) => {
-  const accounts = await GmailAccount.find({ userId, isActive: true });
+  console.log(`[Manual Scan] Starting inbox scan for user: ${userId}`);
+  const accounts = await GmailAccount.find({
+    userId,
+    isActive: true
+  });
+
+  if (!accounts || accounts.length === 0) {
+    console.warn(`[Manual Scan] No active Gmail accounts found for user ${userId}`);
+    return { success: false, createdEvents: 0, message: 'No active connected Gmail accounts found. Please link an account in the Accounts tab.' };
+  }
+
   let totalCreated = 0;
   for (const account of accounts) {
     const res = await pollAccount(account, true);
     totalCreated += (res?.createdCount || 0);
   }
-  return { success: true, createdEvents: totalCreated };
+  return { success: true, createdEvents: totalCreated, message: `Scanned ${accounts.length} account(s). Created ${totalCreated} event(s).` };
 };
 
 /**

@@ -12,18 +12,27 @@ const getOAuthClient = (account) => {
         config.google.clientId,
         config.google.clientSecret
     );
+    const decryptedAccess = account.getDecryptedAccessToken();
+    const decryptedRefresh = account.getDecryptedRefreshToken();
+
     oauth2Client.setCredentials({
-        access_token: account.getDecryptedAccessToken(),
-        refresh_token: account.getDecryptedRefreshToken(),
+        access_token: decryptedAccess,
+        refresh_token: decryptedRefresh || undefined,
     });
     
-    // Add token refresh event listener to automatically get new token when using
-    oauth2Client.on('tokens', (tokens) => {
-      if (tokens.refresh_token) {
-        account.refreshToken = tokens.refresh_token;
+    oauth2Client.on('tokens', async (tokens) => {
+      try {
+        if (tokens.refresh_token) {
+          account.refreshToken = tokens.refresh_token;
+        }
+        if (tokens.access_token) {
+          account.accessToken = tokens.access_token;
+        }
+        await account.save();
+        console.log(`Updated refreshed access tokens for ${account.email}`);
+      } catch (err) {
+        console.error('Error saving refreshed tokens:', err?.message);
       }
-      account.accessToken = tokens.access_token;
-      // Note: Ideally save this updated account to DB here
     });
 
     return oauth2Client;
@@ -149,17 +158,16 @@ export const getThread = async (gmailClient, threadId) => {
     }
 };
 
-export const getInboxMessages = async (account, maxResults = 25) => {
+export const getInboxMessages = async (account, maxResults = 30) => {
     const gmail = getGmailClient(account);
     try {
         const listRes = await gmail.users.messages.list({
             userId: 'me',
             maxResults,
-            q: 'label:INBOX'
         });
         return listRes.data.messages || [];
     } catch (error) {
-        console.error('Error fetching inbox messages:', error);
+        console.error(`Error fetching inbox messages for ${account.email}:`, error.message);
         throw error;
     }
 };
