@@ -136,13 +136,14 @@ export const evaluatePreAiFilter = (emailContent = {}) => {
     }
   }
 
-  // 3. Known Automated/Transactional Senders without event content
+  // 3. Known Automated/Transactional/Social Senders without event content
   const promotionalSenders = [
     'marketing@', 'promotions@', 'newsletter@', 'newsletters@', 'digest@',
     'no-reply@accounts.google.com', 'account-security-noreply@',
     'orders@', 'shipping@', 'delivery@', 'billing@', 'payments@',
     'swiggy.in', 'zomato.com', 'uber.com', 'ola.com', 'amazon.in', 'amazon.com',
-    'flipkart.com', 'myntra.com', 'netflix.com', 'spotify.com'
+    'flipkart.com', 'myntra.com', 'netflix.com', 'spotify.com',
+    'mail.instagram.com', 'instagram.com', 'linkedin.com', 'facebookmail.com', 'x.com', 'twitter.com'
   ];
 
   const isPromoSender = promotionalSenders.some(s => from.includes(s));
@@ -427,44 +428,101 @@ export const pollAccount = async (account, fullInboxScan = false) => {
             await processedThread.save();
           }
 
-        } else if (aiResponse.action === 'RESCHEDULE' && existingEvent && eventsToProcess.length > 0) {
+        } else if (aiResponse.action === 'RESCHEDULE' && eventsToProcess.length > 0) {
           const eventItem = eventsToProcess[0];
           const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem, userTimeZone);
           let eventStart = fallbackStart;
           let eventEnd = fallbackEnd;
 
-          if (existingEvent.calendarEventId) {
-            const calendarResult = await updateEvent(user, existingEvent.calendarEventId, {
-              ...eventItem,
-              date: eventItem.date,
-              startTime: eventItem.startTime,
-              endTime: eventItem.endTime
+          if (existingEvent) {
+            if (existingEvent.calendarEventId) {
+              const calendarResult = await updateEvent(user, existingEvent.calendarEventId, {
+                ...eventItem,
+                date: eventItem.date,
+                startTime: eventItem.startTime,
+                endTime: eventItem.endTime
+              });
+              if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
+              if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
+            }
+
+            existingEvent.history.push({
+              action: 'rescheduled',
+              previousStart: existingEvent.startTime,
+              previousEnd: existingEvent.endTime,
+              changedAt: new Date(),
+              triggerEmailId: msg.id
             });
-            if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
-            if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
-          }
+            existingEvent.title = eventItem.title || existingEvent.title;
+            existingEvent.startTime = eventStart;
+            existingEvent.endTime = eventEnd;
+            existingEvent.location = eventItem.location || existingEvent.location;
+            existingEvent.status = 'rescheduled';
+            await existingEvent.save();
 
-          existingEvent.history.push({
-            action: 'rescheduled',
-            previousStart: existingEvent.startTime,
-            previousEnd: existingEvent.endTime,
-            changedAt: new Date(),
-            triggerEmailId: msg.id
-          });
-          existingEvent.title = eventItem.title || existingEvent.title;
-          existingEvent.startTime = eventStart;
-          existingEvent.endTime = eventEnd;
-          existingEvent.location = eventItem.location || existingEvent.location;
-          existingEvent.status = 'rescheduled';
-          await existingEvent.save();
+            if (processedThread) {
+              processedThread.lastMessageId = msg.id;
+              processedThread.messageCount += 1;
+              processedThread.lastProcessedAt = new Date();
+              await processedThread.save();
+            }
+            console.log(`[Poller] Rescheduled event ${existingEvent.calendarEventId}`);
+          } else {
+            // No existing event in DB for this thread yet - treat the rescheduled details as a new event
+            let calendarEventId = null;
+            if (user.settings?.autoAdd !== false) {
+              const calendarResult = await createEvent(user, {
+                ...eventItem,
+                description: (eventItem.description || '').trim(),
+                location: eventItem.location || '',
+                meetingLink: eventItem.meetingLink,
+                date: eventItem.date,
+                startTime: eventItem.startTime,
+                endTime: eventItem.endTime
+              });
+              calendarEventId = calendarResult?.id || calendarResult;
+              if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
+              if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
+            }
 
-          if (processedThread) {
-            processedThread.lastMessageId = msg.id;
-            processedThread.messageCount += 1;
-            processedThread.lastProcessedAt = new Date();
-            await processedThread.save();
+            const newEvent = new Event({
+              userId: user._id,
+              threadId: processedThread?._id,
+              calendarEventId: calendarEventId ? String(calendarEventId) : null,
+              title: eventItem.title || 'Rescheduled Event',
+              description: eventItem.description || '',
+              location: eventItem.location || '',
+              startTime: eventStart,
+              endTime: eventEnd,
+              status: 'scheduled',
+              history: [{
+                action: 'created',
+                changedAt: new Date(),
+                triggerEmailId: msg.id
+              }]
+            });
+            await newEvent.save();
+
+            if (!processedThread) {
+              const newThreadRecord = new ProcessedThread({
+                userId: user._id,
+                accountId: account._id,
+                gmailThreadId: threadId,
+                lastMessageId: msg.id,
+                messageCount: 1,
+                linkedEvent: newEvent._id,
+                status: 'active',
+                threadSnippet: eventItem.title || parsedSubject || 'Rescheduled Event'
+              });
+              await newThreadRecord.save();
+            } else {
+              processedThread.lastMessageId = msg.id;
+              processedThread.lastProcessedAt = new Date();
+              processedThread.linkedEvent = newEvent._id;
+              await processedThread.save();
+            }
+            console.log(`[Poller] Created new event from RESCHEDULE action: "${newEvent.title}"`);
           }
-          console.log(`[Poller] Rescheduled event ${existingEvent.calendarEventId}`);
 
         } else if (aiResponse.action === 'CANCEL' && existingEvent) {
           if (existingEvent.calendarEventId) {
@@ -488,9 +546,21 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           }
           console.log(`[Poller] Cancelled event ${existingEvent.calendarEventId}`);
 
-        } else if (aiResponse.action === 'NO_EVENT') {
-          console.log(`[Poller] No event detected for thread ${threadId} ("${parsedSubject}")`);
-          if (processedThread) {
+        } else {
+          // NO_EVENT or unhandled action - save thread to prevent repeated AI processing
+          console.log(`[Poller] No event to create for thread ${threadId} ("${parsedSubject}")`);
+          if (!processedThread) {
+            const newThreadRecord = new ProcessedThread({
+              userId: user._id,
+              accountId: account._id,
+              gmailThreadId: threadId,
+              lastMessageId: msg.id,
+              messageCount: 1,
+              status: 'no_event',
+              threadSnippet: parsedSubject || 'No Event'
+            });
+            await newThreadRecord.save();
+          } else {
             processedThread.lastMessageId = msg.id;
             processedThread.lastProcessedAt = new Date();
             await processedThread.save();
