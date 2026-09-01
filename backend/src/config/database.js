@@ -3,7 +3,8 @@ import { config } from './index.js';
 
 export const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(config.mongoUri);
+    console.log('Connecting to MongoDB...');
+    const conn = await mongoose.connect(config.mongoUri, { serverSelectionTimeoutMS: 8000 });
     console.log(`MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Error connecting to MongoDB: ${error.message}`);
