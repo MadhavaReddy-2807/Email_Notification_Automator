@@ -236,8 +236,7 @@ export const createEvent = async (user, eventData) => {
             useDefault: false,
             overrides: [
                 { method: 'popup', minutes: 10 },
-                { method: 'popup', minutes: 30 },
-                { method: 'email', minutes: 60 }  // Google Calendar sends an email notification 1 hour prior
+                { method: 'popup', minutes: 30 }
             ]
         }
     };
