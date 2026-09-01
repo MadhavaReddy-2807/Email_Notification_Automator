@@ -1,6 +1,57 @@
 import Event from '../models/Event.js';
 import User from '../models/User.js';
+import ProcessedThread from '../models/ProcessedThread.js';
+import GmailAccount from '../models/GmailAccount.js';
 import * as calendarService from '../services/calendarService.js';
+
+/**
+ * Get comprehensive statistics for emails scanned and events added
+ */
+export const getEventStats = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const [
+      totalEvents,
+      syncedEvents,
+      rescheduledEvents,
+      cancelledEvents,
+      threads,
+      accounts
+    ] = await Promise.all([
+      Event.countDocuments({ userId }),
+      Event.countDocuments({ userId, calendarEventId: { $exists: true, $ne: null } }),
+      Event.countDocuments({ userId, status: 'rescheduled' }),
+      Event.countDocuments({ userId, status: 'cancelled' }),
+      ProcessedThread.find({ userId }),
+      GmailAccount.find({ userId, isActive: true })
+    ]);
+
+    const totalThreads = threads.length;
+    const totalEmailsScanned = threads.reduce((acc, t) => acc + (t.messageCount || 1), 0);
+    const lastScanTime = accounts.reduce((latest, acc) => {
+      if (!acc.lastPolledAt) return latest;
+      return !latest || acc.lastPolledAt > latest ? acc.lastPolledAt : latest;
+    }, null);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalEmailsScanned,
+        totalThreads,
+        totalEvents,
+        syncedEvents,
+        rescheduledEvents,
+        cancelledEvents,
+        activeAccounts: accounts.length,
+        lastScanTime
+      }
+    });
+  } catch (error) {
+    console.error('Error in getEventStats:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch statistics' });
+  }
+};
+
 
 /**
  * List events for the current user with pagination and optional status filter

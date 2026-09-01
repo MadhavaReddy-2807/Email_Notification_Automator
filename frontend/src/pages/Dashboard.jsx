@@ -19,9 +19,14 @@ import toast from 'react-hot-toast';
 const Dashboard = () => {
   const { user } = useAuth();
   const [stats, setStats] = useState({
-    totalEmails: 0,
-    scheduledEvents: 0,
+    totalEmailsScanned: 0,
+    totalThreads: 0,
+    totalEvents: 0,
+    syncedEvents: 0,
+    rescheduledEvents: 0,
+    cancelledEvents: 0,
     accountsCount: user?.accounts?.length || 0,
+    lastScanTime: null,
   });
   const [recentEmails, setRecentEmails] = useState([]);
   const [upcomingEvents, setUpcomingEvents] = useState([]);
@@ -33,10 +38,11 @@ const Dashboard = () => {
       if (showToast) setRefreshing(true);
       else setLoading(true);
 
-      const [emailsRes, eventsRes, accountsRes] = await Promise.allSettled([
+      const [emailsRes, eventsRes, accountsRes, statsRes] = await Promise.allSettled([
         emailsApi.list({ page: 1, limit: 5 }),
         eventsApi.list({ page: 1, limit: 5, status: 'scheduled' }),
         accountsApi.list(),
+        eventsApi.getStats(),
       ]);
 
       let emailCount = 0;
@@ -57,11 +63,32 @@ const Dashboard = () => {
         accountCount = accountsRes.value.data.data?.length || 0;
       }
 
-      setStats({
-        totalEmails: emailCount,
-        scheduledEvents: eventCount,
+      let detailedStats = {
+        totalEmailsScanned: emailCount,
+        totalThreads: emailCount,
+        totalEvents: eventCount,
+        syncedEvents: eventCount,
+        rescheduledEvents: 0,
+        cancelledEvents: 0,
         accountsCount: accountCount,
-      });
+        lastScanTime: null,
+      };
+
+      if (statsRes.status === 'fulfilled' && statsRes.value?.data?.success) {
+        const s = statsRes.value.data.data;
+        detailedStats = {
+          totalEmailsScanned: s.totalEmailsScanned || emailCount,
+          totalThreads: s.totalThreads || emailCount,
+          totalEvents: s.totalEvents || eventCount,
+          syncedEvents: s.syncedEvents || eventCount,
+          rescheduledEvents: s.rescheduledEvents || 0,
+          cancelledEvents: s.cancelledEvents || 0,
+          accountsCount: s.activeAccounts || accountCount,
+          lastScanTime: s.lastScanTime,
+        };
+      }
+
+      setStats(detailedStats);
 
       if (showToast) toast.success('Dashboard refreshed!');
     } catch (err) {
@@ -150,9 +177,9 @@ const Dashboard = () => {
               <FiMail />
             </div>
             <div className="stat-details">
-              <span className="stat-label">Processed Threads</span>
-              <h3 className="stat-value">{stats.totalEmails}</h3>
-              <span className="stat-subtext">Scanned by Gemini AI</span>
+              <span className="stat-label">Emails Scanned</span>
+              <h3 className="stat-value">{stats.totalEmailsScanned}</h3>
+              <span className="stat-subtext">{stats.totalThreads} Threads Analyzed</span>
             </div>
           </div>
 
@@ -161,9 +188,9 @@ const Dashboard = () => {
               <FiCalendar />
             </div>
             <div className="stat-details">
-              <span className="stat-label">Scheduled Events</span>
-              <h3 className="stat-value">{stats.scheduledEvents}</h3>
-              <span className="stat-subtext">Active on Google Calendar</span>
+              <span className="stat-label">Events Added</span>
+              <h3 className="stat-value">{stats.totalEvents}</h3>
+              <span className="stat-subtext">{stats.syncedEvents} Synced to Google Cal</span>
             </div>
           </div>
 
@@ -172,9 +199,9 @@ const Dashboard = () => {
               <FiUsers />
             </div>
             <div className="stat-details">
-              <span className="stat-label">Linked Accounts</span>
+              <span className="stat-label">Linked Inboxes</span>
               <h3 className="stat-value">{stats.accountsCount}</h3>
-              <span className="stat-subtext">Monitored inboxes</span>
+              <span className="stat-subtext">Active monitoring</span>
             </div>
           </div>
 
@@ -184,10 +211,53 @@ const Dashboard = () => {
             </div>
             <div className="stat-details">
               <span className="stat-label">Automation Status</span>
-              <h3 className="stat-value text-success">Healthy</h3>
-              <span className="stat-subtext">Cron: Every 2 Minutes</span>
+              <h3 className="stat-value text-success">Active</h3>
+              <span className="stat-subtext">
+                {stats.lastScanTime ? `Last scan: ${new Date(stats.lastScanTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Cron: Every 2 Mins'}
+              </span>
             </div>
           </div>
+        </div>
+
+        {/* Sync Summary & Quick Insights Bar */}
+        <div className="card-section" style={{
+          background: 'var(--card-bg, #ffffff)',
+          border: '1px solid var(--border-color, #e2e8f0)',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary, #1e293b)' }}>
+              📊 Sync Insights:
+            </span>
+            <span className="badge badge-success">
+              ✓ {stats.syncedEvents} Calendar Events Synced
+            </span>
+            {stats.rescheduledEvents > 0 && (
+              <span className="badge badge-warning">
+                🔄 {stats.rescheduledEvents} Rescheduled
+              </span>
+            )}
+            {stats.cancelledEvents > 0 && (
+              <span className="badge badge-danger">
+                ✕ {stats.cancelledEvents} Cancelled
+              </span>
+            )}
+            <span className="badge badge-secondary">
+              🛡️ AI Duplicate Protection Active
+            </span>
+          </div>
+          {stats.lastScanTime && (
+            <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)' }}>
+              🕒 Last Inbox Poller Run: {new Date(stats.lastScanTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
         </div>
 
         {/* Two Column Grid: Recent Emails & Upcoming Events */}
