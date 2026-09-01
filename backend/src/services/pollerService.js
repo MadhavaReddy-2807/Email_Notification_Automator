@@ -269,22 +269,23 @@ export const pollAccount = async (account, fullInboxScan = false) => {
         const preAiCheck = evaluatePreAiFilter(latestParsedMessage);
         if (preAiCheck.shouldSkip) {
           console.log(`[Pre-AI Filter ⚡] Skipped non-event email "${parsedSubject}" from "${latestParsedMessage.from}": ${preAiCheck.reason}`);
-          if (!processedThread) {
-            const newThreadRecord = new ProcessedThread({
-              userId: user._id,
-              accountId: account._id,
-              gmailThreadId: threadId,
-              lastMessageId: msg.id,
-              messageCount: 1,
-              status: 'no_event',
-              threadSnippet: parsedSubject || 'Filtered Non-Event'
-            });
-            await newThreadRecord.save();
-          } else {
-            processedThread.lastMessageId = msg.id;
-            processedThread.lastProcessedAt = new Date();
-            await processedThread.save();
-          }
+          await ProcessedThread.findOneAndUpdate(
+            { accountId: account._id, gmailThreadId: threadId },
+            {
+              $set: {
+                userId: user._id,
+                lastMessageId: msg.id,
+                lastProcessedAt: new Date(),
+                status: 'no_event',
+                threadSnippet: parsedSubject || 'Filtered Non-Event'
+              },
+              $setOnInsert: {
+                firstProcessedAt: new Date(),
+                messageCount: 1
+              }
+            },
+            { upsert: true, new: true }
+          );
           continue; // Bypasses expensive Gemini API call
         }
 
@@ -308,22 +309,23 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
         if (aiResponse.confidence < 0.4) {
           console.log(`[Poller] Low confidence (${aiResponse.confidence}) for "${parsedSubject}", skipping.`);
-          if (!processedThread) {
-            const newThreadRecord = new ProcessedThread({
-              userId: user._id,
-              accountId: account._id,
-              gmailThreadId: threadId,
-              lastMessageId: msg.id,
-              messageCount: 1,
-              status: 'no_event',
-              threadSnippet: parsedSubject || 'Low Confidence'
-            });
-            await newThreadRecord.save();
-          } else {
-            processedThread.lastMessageId = msg.id;
-            processedThread.lastProcessedAt = new Date();
-            await processedThread.save();
-          }
+          await ProcessedThread.findOneAndUpdate(
+            { accountId: account._id, gmailThreadId: threadId },
+            {
+              $set: {
+                userId: user._id,
+                lastMessageId: msg.id,
+                lastProcessedAt: new Date(),
+                status: 'no_event',
+                threadSnippet: parsedSubject || 'Low Confidence'
+              },
+              $setOnInsert: {
+                firstProcessedAt: new Date(),
+                messageCount: 1
+              }
+            },
+            { upsert: true, new: true }
+          );
           continue;
         }
 
@@ -566,24 +568,25 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           console.log(`[Poller] Cancelled event ${existingEvent.calendarEventId}`);
 
         } else {
-          // NO_EVENT or unhandled action - save thread to prevent repeated AI processing
+          // NO_EVENT or unhandled action - save thread atomically to prevent duplicate key race conditions
           console.log(`[Poller] No event to create for thread ${threadId} ("${parsedSubject}")`);
-          if (!processedThread) {
-            const newThreadRecord = new ProcessedThread({
-              userId: user._id,
-              accountId: account._id,
-              gmailThreadId: threadId,
-              lastMessageId: msg.id,
-              messageCount: 1,
-              status: 'no_event',
-              threadSnippet: parsedSubject || 'No Event'
-            });
-            await newThreadRecord.save();
-          } else {
-            processedThread.lastMessageId = msg.id;
-            processedThread.lastProcessedAt = new Date();
-            await processedThread.save();
-          }
+          await ProcessedThread.findOneAndUpdate(
+            { accountId: account._id, gmailThreadId: threadId },
+            {
+              $set: {
+                userId: user._id,
+                lastMessageId: msg.id,
+                lastProcessedAt: new Date(),
+                status: 'no_event',
+                threadSnippet: parsedSubject || 'No Event'
+              },
+              $setOnInsert: {
+                firstProcessedAt: new Date(),
+                messageCount: 1
+              }
+            },
+            { upsert: true, new: true }
+          );
         }
       } catch (err) {
         console.error(`[Poller] Error processing message ${msg.id}:`, err);

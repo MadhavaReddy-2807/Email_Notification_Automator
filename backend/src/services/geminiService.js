@@ -21,17 +21,28 @@ const extractJson = (rawText) => {
     throw new Error('Empty AI response');
   }
 
-  // 1. Try stripping markdown fences first
-  const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  // 1. Strip markdown fences and clean whitespace
+  let text = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
   try {
-    return JSON.parse(cleaned);
-  } catch (e) {
+    return JSON.parse(text);
+  } catch (e1) {
     // 2. Search for the outermost JSON object {...}
-    const match = rawText.match(/\{[\s\S]*\}/);
+    const match = text.match(/\{[\s\S]*\}/);
     if (match) {
-      return JSON.parse(match[0]);
+      let jsonCandidate = match[0].trim();
+      try {
+        return JSON.parse(jsonCandidate);
+      } catch (e2) {
+        // 3. Clean up trailing commas, unquoted keys, or malformed newlines inside candidate
+        const cleanedCandidate = jsonCandidate
+          .replace(/,\s*([\}\]])/g, '$1') // remove trailing commas
+          .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '') // strip comments
+          .trim();
+        return JSON.parse(cleanedCandidate);
+      }
     }
-    throw e;
+    throw e1;
   }
 };
 const callGemini = async (prompt) => {
