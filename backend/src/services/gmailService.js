@@ -213,7 +213,14 @@ export const parseEmailContent = (message) => {
     };
 
     const extracted = extractBody(message.payload);
-    parsed.body = (extracted && extracted.trim().length > 0) ? extracted.trim() : (message.snippet || '');
+    let fullBody = (extracted && extracted.trim().length > 0) ? extracted.trim() : (message.snippet || '');
+
+    // Token optimization: Truncate excessively long email bodies (e.g. huge marketing/signatures) to 3000 chars
+    if (fullBody.length > 3000) {
+        fullBody = fullBody.substring(0, 3000) + '... [truncated]';
+    }
+
+    parsed.body = fullBody;
     return parsed;
 };
 

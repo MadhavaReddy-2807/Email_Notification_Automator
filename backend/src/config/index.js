@@ -22,6 +22,22 @@ requiredEnvVars.forEach((envVar) => {
   }
 });
 
+const apiKeys = (process.env.GEMINI_API_KEY || '')
+  .split(',')
+  .map(k => k.trim())
+  .filter(Boolean);
+
+let currentKeyIndex = 0;
+
+export const getNextGeminiApiKey = () => {
+  if (apiKeys.length === 0) {
+    return process.env.GEMINI_API_KEY || '';
+  }
+  const key = apiKeys[currentKeyIndex % apiKeys.length];
+  currentKeyIndex++;
+  return key;
+};
+
 export const config = {
   port: process.env.PORT,
   nodeEnv: process.env.NODE_ENV,
@@ -32,7 +48,8 @@ export const config = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI
   },
   gemini: {
-    apiKey: process.env.GEMINI_API_KEY
+    apiKey: apiKeys[0] || process.env.GEMINI_API_KEY,
+    apiKeys: apiKeys
   },
   sessionSecret: process.env.SESSION_SECRET,
   encryptionKey: process.env.ENCRYPTION_KEY,

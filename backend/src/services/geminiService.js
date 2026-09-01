@@ -1,14 +1,15 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { config } from '../config/index.js';
+import { config, getNextGeminiApiKey } from '../config/index.js';
 
+// Optimized hierarchy: High-RPM & high-quota workhorses first, 20-RPD previews last
 const FALLBACK_MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3.6-flash',
-  'gemini-3.7-flash',
-  'gemini-3.1-flash-lite',
-  'gemma-4-31b-it',
-  'gemma-4-26b-a4b-it'
+  'gemini-3.5-flash-lite', // 15 RPM | 500 RPD
+  'gemma-4-31b-it',        // 30 RPM | 1,500 RPD (absorbs bursts)
+  'gemma-4-26b-a4b-it',    // 30 RPM | 1,500 RPD
+  'gemini-3.1-flash-lite', // 15 RPM | 500 RPD
+  'gemini-3.5-flash',      // 20 RPD reserve preview
+  'gemini-3.6-flash',      // 20 RPD reserve preview
+  'gemini-3.7-flash'       // 20 RPD reserve preview
 ];
 
 /**
@@ -34,7 +35,8 @@ const extractJson = (rawText) => {
   }
 };
 const callGemini = async (prompt) => {
-    const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
+    const apiKey = getNextGeminiApiKey();
+    const genAI = new GoogleGenerativeAI(apiKey);
     const fullPrompt = `You are an AI assistant specialized in deeply parsing emails to extract rich, comprehensive calendar events.
 Respond ONLY with a valid JSON object matching this schema. Do not add markdown code blocks or commentary:
 {
@@ -176,7 +178,8 @@ export const checkIsDuplicateWithGemini = async (candidateEvent, existingEvents 
         return { isDuplicate: false, duplicateEventId: null, reasoning: 'No existing events found in time window' };
     }
 
-    const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
+    const apiKey = getNextGeminiApiKey();
+    const genAI = new GoogleGenerativeAI(apiKey);
 
     const prompt = `You are a Calendar Assistant checking for duplicate events.
 Candidate Event to Add:

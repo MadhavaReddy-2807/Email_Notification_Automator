@@ -661,6 +661,8 @@ export const startPolling = () => {
       const accounts = await GmailAccount.find({ isActive: true });
       for (const account of accounts) {
         await pollAccount(account, false);
+        // Stagger accounts with 2s pause to spread requests evenly across the 2-minute cycle
+        await new Promise(r => setTimeout(r, 2000));
       }
     } catch (error) {
       console.error('Error fetching accounts for polling:', error);
