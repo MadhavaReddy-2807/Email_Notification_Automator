@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { eventsApi } from '../services/api';
+import { eventsApi, emailsApi } from '../services/api';
 import { 
   FiCalendar, 
   FiRefreshCw, 
@@ -21,6 +21,7 @@ const Events = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, pages: 1 });
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [editingEvent, setEditingEvent] = useState(null);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -42,6 +43,22 @@ const Events = () => {
       toast.error('Failed to load calendar events');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleScanInboxes = async () => {
+    try {
+      setScanning(true);
+      toast.loading('Scanning connected inboxes with Gemini AI...', { id: 'scanToast' });
+      const res = await emailsApi.scan();
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Inboxes scanned!', { id: 'scanToast' });
+        fetchEvents(1, statusFilter);
+      }
+    } catch (err) {
+      toast.error('Failed to scan inboxes', { id: 'scanToast' });
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -109,6 +126,15 @@ const Events = () => {
           </div>
 
           <div className="header-filter-group">
+            <button 
+              className="btn btn-primary btn-icon-text"
+              onClick={handleScanInboxes}
+              disabled={scanning || loading}
+            >
+              <FiRefreshCw className={scanning ? 'spin' : ''} />
+              <span>{scanning ? 'Scanning...' : 'Scan Inboxes'}</span>
+            </button>
+
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -123,7 +149,7 @@ const Events = () => {
             <button 
               className="btn btn-secondary btn-icon-text"
               onClick={() => fetchEvents(pagination.page)}
-              disabled={loading}
+              disabled={loading || scanning}
             >
               <FiRefreshCw className={loading ? 'spin' : ''} />
               <span>Refresh</span>

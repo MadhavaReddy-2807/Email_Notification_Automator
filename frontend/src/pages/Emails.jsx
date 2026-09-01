@@ -40,6 +40,24 @@ const Emails = () => {
     fetchEmails(1);
   }, []);
 
+  const [scanning, setScanning] = useState(false);
+
+  const handleScanInboxes = async () => {
+    try {
+      setScanning(true);
+      toast.loading('Scanning connected inboxes with Gemini AI...', { id: 'scanToast' });
+      const res = await emailsApi.scan();
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Inboxes scanned!', { id: 'scanToast' });
+        fetchEmails(1);
+      }
+    } catch (err) {
+      toast.error('Failed to scan inboxes', { id: 'scanToast' });
+    } finally {
+      setScanning(false);
+    }
+  };
+
   return (
     <Layout title="Processed Email Threads">
       <div className="page-content">
@@ -48,14 +66,24 @@ const Emails = () => {
             <h2>Email Intelligence Feed</h2>
             <p>Emails evaluated by Gemini AI for calendar appointments, reschedules, and cancellations.</p>
           </div>
-          <button 
-            className="btn btn-secondary btn-icon-text"
-            onClick={() => fetchEmails(pagination.page)}
-            disabled={loading}
-          >
-            <FiRefreshCw className={loading ? 'spin' : ''} />
-            <span>Refresh</span>
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button 
+              className="btn btn-primary btn-icon-text"
+              onClick={handleScanInboxes}
+              disabled={scanning || loading}
+            >
+              <FiRefreshCw className={scanning ? 'spin' : ''} />
+              <span>{scanning ? 'Scanning...' : 'Scan Inboxes'}</span>
+            </button>
+            <button 
+              className="btn btn-secondary btn-icon-text"
+              onClick={() => fetchEmails(pagination.page)}
+              disabled={loading || scanning}
+            >
+              <FiRefreshCw className={loading ? 'spin' : ''} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
 
         <div className="table-card">

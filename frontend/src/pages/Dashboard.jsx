@@ -87,6 +87,22 @@ const Dashboard = () => {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to sync event');
     }
+  const [scanning, setScanning] = useState(false);
+
+  const handleScanInboxes = async () => {
+    try {
+      setScanning(true);
+      toast.loading('Scanning all connected inboxes with Gemini AI...', { id: 'scanToast' });
+      const res = await emailsApi.scan();
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Inboxes scanned successfully!', { id: 'scanToast' });
+        loadDashboardData(false);
+      }
+    } catch (err) {
+      toast.error('Failed to scan inboxes', { id: 'scanToast' });
+    } finally {
+      setScanning(false);
+    }
   };
 
   return (
@@ -103,14 +119,22 @@ const Dashboard = () => {
           </div>
           <div className="welcome-actions">
             <button 
+              className="btn btn-primary btn-icon-text"
+              onClick={handleScanInboxes}
+              disabled={scanning || refreshing}
+            >
+              <FiRefreshCw className={scanning ? 'spin' : ''} />
+              <span>{scanning ? 'Scanning...' : 'Scan Inboxes'}</span>
+            </button>
+            <button 
               className="btn btn-secondary btn-icon-text"
               onClick={() => loadDashboardData(true)}
-              disabled={refreshing}
+              disabled={refreshing || scanning}
             >
               <FiRefreshCw className={refreshing ? 'spin' : ''} />
               <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
             </button>
-            <Link to="/accounts" className="btn btn-primary btn-icon-text">
+            <Link to="/accounts" className="btn btn-secondary btn-icon-text">
               <FiPlusCircle />
               <span>Link Account</span>
             </Link>

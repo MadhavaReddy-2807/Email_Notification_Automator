@@ -145,8 +145,8 @@ export const createEvent = async (user, eventData) => {
         reminders: {
             useDefault: false,
             overrides: [
-                { method: 'popup', minutes: 30 },
-                { method: 'email', minutes: 30 }
+                { method: 'popup', minutes: 10 },
+                { method: 'popup', minutes: 30 }
             ]
         }
     };
@@ -220,8 +220,8 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
         reminders: {
             useDefault: false,
             overrides: [
-                { method: 'popup', minutes: 30 },
-                { method: 'email', minutes: 30 }
+                { method: 'popup', minutes: 10 },
+                { method: 'popup', minutes: 30 }
             ]
         }
     };
@@ -244,6 +244,36 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
     } catch (error) {
         console.error(`Error updating calendar event ${calendarEventId}:`, error);
         throw error;
+    }
+};
+
+/**
+ * List existing Google Calendar events around a given date
+ * @param {Object} user
+ * @param {string} dateStr - YYYY-MM-DD
+ * @returns {Promise<Array<Object>>}
+ */
+export const listCalendarEventsAroundDate = async (user, dateStr) => {
+    try {
+        const calendar = await getCalendarClient(user);
+        let baseDate = dateStr;
+        if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) {
+            baseDate = new Date().toISOString().split('T')[0];
+        }
+        const startOfDay = new Date(`${baseDate}T00:00:00.000Z`);
+        const endOfDay = new Date(`${baseDate}T23:59:59.999Z`);
+
+        const res = await calendar.events.list({
+            calendarId: 'primary',
+            timeMin: startOfDay.toISOString(),
+            timeMax: endOfDay.toISOString(),
+            singleEvents: true,
+            orderBy: 'startTime'
+        });
+        return res.data?.items || [];
+    } catch (err) {
+        console.warn('Could not list Google Calendar events around date:', err?.message);
+        return [];
     }
 };
 

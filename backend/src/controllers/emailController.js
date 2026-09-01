@@ -1,4 +1,5 @@
 import ProcessedThread from '../models/ProcessedThread.js';
+import { scanUserInboxes } from '../services/pollerService.js';
 
 export const listEmails = async (req, res) => {
   try {
@@ -54,3 +55,21 @@ export const getThread = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch thread' });
   }
 };
+
+/**
+ * Manually trigger a full scan of connected inboxes
+ */
+export const scanEmails = async (req, res) => {
+  try {
+    const result = await scanUserInboxes(req.user._id);
+    res.status(200).json({
+      success: true,
+      message: `Scan complete! Created ${result.createdEvents} new event(s).`,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error in scanEmails:', error);
+    res.status(500).json({ success: false, error: 'Failed to scan inboxes' });
+  }
+};
+

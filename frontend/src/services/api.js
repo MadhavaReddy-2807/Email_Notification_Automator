@@ -26,6 +26,7 @@ export const accountsApi = {
 export const emailsApi = {
   list: (params = { page: 1, limit: 10 }) => api.get('/emails', { params }),
   getThread: (threadId) => api.get(`/emails/threads/${threadId}`),
+  scan: () => api.post('/emails/scan'),
 };
 
 // Events API

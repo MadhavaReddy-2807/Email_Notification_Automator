@@ -147,6 +147,19 @@ export const getThread = async (gmailClient, threadId) => {
         console.error(`Error fetching thread ${threadId}:`, error);
         throw error;
     }
+export const getInboxMessages = async (account, maxResults = 25) => {
+    const gmail = getGmailClient(account);
+    try {
+        const listRes = await gmail.users.messages.list({
+            userId: 'me',
+            maxResults,
+            q: 'label:INBOX'
+        });
+        return listRes.data.messages || [];
+    } catch (error) {
+        console.error('Error fetching inbox messages:', error);
+        throw error;
+    }
 };
 
 /**
@@ -156,7 +169,7 @@ export const getThread = async (gmailClient, threadId) => {
  * @returns {Object} Parsed email details
  */
 export const parseEmailContent = (message) => {
-    const headers = message.payload.headers;
+    const headers = message.payload?.headers || [];
     const getHeader = (name) => {
         const header = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
         return header ? header.value : '';
@@ -168,7 +181,7 @@ export const parseEmailContent = (message) => {
         subject: getHeader('Subject'),
         from: getHeader('From'),
         to: getHeader('To'),
-        date: getHeader('Date'),
+        date: getHeader('Date') || (message.internalDate ? new Date(parseInt(message.internalDate, 10)).toISOString() : ''),
         body: ''
     };
 
@@ -189,6 +202,8 @@ export const parseEmailContent = (message) => {
         return '';
     };
 
-    parsed.body = extractBody(message.payload);
+    const extracted = extractBody(message.payload);
+    parsed.body = (extracted && extracted.trim().length > 0) ? extracted.trim() : (message.snippet || '');
     return parsed;
 };
+

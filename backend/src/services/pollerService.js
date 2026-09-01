@@ -1,11 +1,12 @@
 import cron from 'node-cron';
-import { getHistoryChanges, getMessage, getThread, parseEmailContent, getGmailClient } from './gmailService.js';
-import { analyzeEmail, analyzeThread } from './geminiService.js';
-import { createEvent, updateEvent, deleteEvent } from './calendarService.js';
+import { getHistoryChanges, getMessage, getThread, parseEmailContent, getGmailClient, getInboxMessages } from './gmailService.js';
+import { analyzeEmail, analyzeThread, checkIsDuplicateWithGemini } from './geminiService.js';
+import { createEvent, updateEvent, deleteEvent, listCalendarEventsAroundDate } from './calendarService.js';
 import GmailAccount from '../models/GmailAccount.js';
 import User from '../models/User.js';
 import ProcessedThread from '../models/ProcessedThread.js';
 import Event from '../models/Event.js';
+
 
 /**
  * Safely parses event date and time strings into guaranteed valid JavaScript Date objects.
@@ -73,39 +74,76 @@ export const parseEventDates = (eventData = {}) => {
 /**
  * Polls a single Gmail account for changes and processes them
  * @param {Object} account - GmailAccount document to poll
+ * @param {boolean} fullInboxScan - If true, scans inbox messages until last checked
  */
-export const pollAccount = async (account) => {
-  console.log(`Polling account: ${account.email}`);
+export const pollAccount = async (account, fullInboxScan = false) => {
+  console.log(`Polling account: ${account.email} (fullScan=${fullInboxScan})`);
+  let createdEventsCount = 0;
   try {
     const user = await User.findById(account.userId);
     if (!user) {
       console.warn(`User not found for account ${account.email}`);
-      return;
+      return { createdCount: 0 };
     }
 
     const gmailClient = getGmailClient(account);
-    const { messages, newHistoryId } = await getHistoryChanges(account);
+    let messages = [];
+    let newHistoryId = null;
+
+    if (fullInboxScan || !account.lastHistoryId) {
+      // Scan inbox messages
+      messages = await getInboxMessages(account, 30);
+    } else {
+      const historyRes = await getHistoryChanges(account);
+      messages = historyRes.messages || [];
+      newHistoryId = historyRes.newHistoryId;
+
+      // If history changes returned 0, double check recent inbox messages
+      if (messages.length === 0) {
+        const recentInbox = await getInboxMessages(account, 10);
+        // Filter for messages not yet processed in ProcessedThread
+        for (const inboxMsg of recentInbox) {
+          const exists = await ProcessedThread.findOne({
+            accountId: account._id,
+            lastMessageId: inboxMsg.id
+          });
+          if (!exists) {
+            messages.push(inboxMsg);
+          }
+        }
+      }
+    }
 
     if (!messages || messages.length === 0) {
       console.log(`No new messages for ${account.email}`);
       account.lastPolledAt = new Date();
       if (newHistoryId) account.lastHistoryId = newHistoryId;
       await account.save();
-      return;
+      return { createdCount: 0 };
     }
 
-    console.log(`Found ${messages.length} new messages for ${account.email}`);
+    console.log(`Processing ${messages.length} messages for ${account.email}`);
 
     for (const msg of messages) {
       try {
-        // Small rate limit delay between AI calls
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
         const threadId = msg.threadId;
+
+        // Check if thread was already processed with this exact message
+        const processedThread = await ProcessedThread.findOne({
+          gmailThreadId: threadId,
+          accountId: account._id
+        });
+
+        if (processedThread && processedThread.lastMessageId === msg.id && !fullInboxScan) {
+          // Message already analyzed and no full scan requested
+          continue;
+        }
+
+        // Small rate limit delay between AI calls
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Check sender filter if configured
         if (user.settings?.filterSenders?.length > 0) {
-          // Fetch message headers or check sender
           const rawMsg = await getMessage(gmailClient, msg.id);
           const parsed = parseEmailContent(rawMsg);
           const sender = (parsed.from || '').toLowerCase();
@@ -116,24 +154,17 @@ export const pollAccount = async (account) => {
           }
         }
 
-        // Check if we've already processed this thread
-        const processedThread = await ProcessedThread.findOne({
-          gmailThreadId: threadId,
-          accountId: account._id
-        });
         const existingEvent = processedThread?.linkedEvent
           ? await Event.findById(processedThread.linkedEvent)
           : null;
 
         let aiResponse;
         if (processedThread) {
-          // Thread seen before — fetch full thread for context
           console.log(`Thread ${threadId} seen before. Fetching full thread context.`);
           const threadData = await getThread(gmailClient, threadId);
-          const parsedMessages = threadData.messages.map(parseEmailContent);
+          const parsedMessages = (threadData.messages || []).map(parseEmailContent);
           aiResponse = await analyzeThread(parsedMessages, existingEvent || null);
         } else {
-          // New thread — analyze single email
           console.log(`New thread ${threadId}. Fetching message.`);
           const messageData = await getMessage(gmailClient, msg.id);
           const parsedMessage = parseEmailContent(messageData);
@@ -142,49 +173,82 @@ export const pollAccount = async (account) => {
 
         console.log(`AI Action: ${aiResponse.action} (Confidence: ${aiResponse.confidence})`);
 
-        // Only act if confidence is sufficient
-        if (aiResponse.confidence < 0.5) {
+        if (aiResponse.confidence < 0.4) {
           console.log(`Low confidence (${aiResponse.confidence}), skipping action.`);
           continue;
         }
 
-        if (aiResponse.action === 'CREATE' && aiResponse.event) {
-          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(aiResponse.event);
+        const eventsToProcess = (aiResponse.events && aiResponse.events.length > 0)
+          ? aiResponse.events
+          : (aiResponse.event ? [aiResponse.event] : []);
 
-          let calendarEventId = null;
-          let eventStart = fallbackStart;
-          let eventEnd = fallbackEnd;
+        if (aiResponse.action === 'CREATE' && eventsToProcess.length > 0) {
+          let lastCreatedEventId = null;
 
-          // Auto-add to Google Calendar only if autoAdd setting is not false
-          if (user.settings?.autoAdd !== false) {
-            const calendarResult = await createEvent(user, {
-              ...aiResponse.event,
-              date: aiResponse.event.date,
-              startTime: aiResponse.event.startTime,
-              endTime: aiResponse.event.endTime
+          for (const eventItem of eventsToProcess) {
+            const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem);
+
+            // Duplicate Check before adding to Google Calendar
+            const checkDate = eventItem.date || fallbackStart.toISOString().split('T')[0];
+            const startWindow = new Date(`${checkDate}T00:00:00.000Z`);
+            startWindow.setDate(startWindow.getDate() - 1);
+            const endWindow = new Date(`${checkDate}T23:59:59.999Z`);
+            endWindow.setDate(endWindow.getDate() + 1);
+
+            const existingDbEvents = await Event.find({
+              userId: user._id,
+              status: { $ne: 'cancelled' },
+              startTime: { $gte: startWindow, $lte: endWindow }
             });
-            calendarEventId = calendarResult?.id || calendarResult;
-            if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
-            if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
-          }
 
-          const newEvent = new Event({
-            userId: user._id,
-            threadId: processedThread?._id,
-            calendarEventId: calendarEventId ? String(calendarEventId) : null,
-            title: aiResponse.event.title || 'Scheduled Event',
-            description: aiResponse.event.description || '',
-            location: aiResponse.event.location || '',
-            startTime: eventStart,
-            endTime: eventEnd,
-            status: 'scheduled',
-            history: [{
-              action: 'created',
-              changedAt: new Date(),
-              triggerEmailId: msg.id
-            }]
-          });
-          await newEvent.save();
+            const existingCalEvents = await listCalendarEventsAroundDate(user, checkDate);
+            const combinedExisting = [...existingDbEvents, ...existingCalEvents];
+
+            const dupCheck = await checkIsDuplicateWithGemini(eventItem, combinedExisting);
+            if (dupCheck.isDuplicate) {
+              console.log(`Duplicate event detected for "${eventItem.title}" on ${checkDate}: ${dupCheck.reasoning}. Skipping duplicate.`);
+              continue;
+            }
+
+            let calendarEventId = null;
+            let eventStart = fallbackStart;
+            let eventEnd = fallbackEnd;
+
+            // Auto-add to Google Calendar
+            if (user.settings?.autoAdd !== false) {
+              const calendarResult = await createEvent(user, {
+                ...eventItem,
+                date: eventItem.date,
+                startTime: eventItem.startTime,
+                endTime: eventItem.endTime
+              });
+              calendarEventId = calendarResult?.id || calendarResult;
+              if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
+              if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
+            }
+
+            const newEvent = new Event({
+              userId: user._id,
+              threadId: processedThread?._id,
+              calendarEventId: calendarEventId ? String(calendarEventId) : null,
+              title: eventItem.title || 'Scheduled Event',
+              description: eventItem.description || '',
+              location: eventItem.location || '',
+              startTime: eventStart,
+              endTime: eventEnd,
+              status: 'scheduled',
+              history: [{
+                action: 'created',
+                changedAt: new Date(),
+                triggerEmailId: msg.id
+              }]
+            });
+            await newEvent.save();
+            lastCreatedEventId = newEvent._id;
+            createdEventsCount += 1;
+
+            console.log(`Created event "${newEvent.title}" (${calendarEventId}) for thread ${threadId}`);
+          }
 
           // Create or update ProcessedThread record
           if (!processedThread) {
@@ -194,29 +258,30 @@ export const pollAccount = async (account) => {
               gmailThreadId: threadId,
               lastMessageId: msg.id,
               messageCount: 1,
-              linkedEvent: newEvent._id,
+              linkedEvent: lastCreatedEventId,
               status: 'active',
-              threadSnippet: aiResponse.event.title || 'Calendar Event'
+              threadSnippet: eventsToProcess[0]?.title || 'Calendar Event'
             });
             await newThreadRecord.save();
-            // Update event with thread reference
-            newEvent.threadId = newThreadRecord._id;
-            await newEvent.save();
+          } else {
+            processedThread.lastMessageId = msg.id;
+            processedThread.lastProcessedAt = new Date();
+            if (lastCreatedEventId) processedThread.linkedEvent = lastCreatedEventId;
+            await processedThread.save();
           }
 
-          console.log(`Created event ${calendarEventId} for thread ${threadId}`);
-
-        } else if (aiResponse.action === 'RESCHEDULE' && existingEvent && aiResponse.event) {
-          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(aiResponse.event);
+        } else if (aiResponse.action === 'RESCHEDULE' && existingEvent && eventsToProcess.length > 0) {
+          const eventItem = eventsToProcess[0];
+          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem);
           let eventStart = fallbackStart;
           let eventEnd = fallbackEnd;
 
           if (existingEvent.calendarEventId) {
             const calendarResult = await updateEvent(user, existingEvent.calendarEventId, {
-              ...aiResponse.event,
-              date: aiResponse.event.date,
-              startTime: aiResponse.event.startTime,
-              endTime: aiResponse.event.endTime
+              ...eventItem,
+              date: eventItem.date,
+              startTime: eventItem.startTime,
+              endTime: eventItem.endTime
             });
             if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
             if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
@@ -229,21 +294,25 @@ export const pollAccount = async (account) => {
             changedAt: new Date(),
             triggerEmailId: msg.id
           });
-          existingEvent.title = aiResponse.event.title || existingEvent.title;
+          existingEvent.title = eventItem.title || existingEvent.title;
           existingEvent.startTime = eventStart;
           existingEvent.endTime = eventEnd;
-          existingEvent.location = aiResponse.event.location || existingEvent.location;
+          existingEvent.location = eventItem.location || existingEvent.location;
           existingEvent.status = 'rescheduled';
           await existingEvent.save();
 
-          processedThread.lastMessageId = msg.id;
-          processedThread.messageCount += 1;
-          processedThread.lastProcessedAt = new Date();
-          await processedThread.save();
+          if (processedThread) {
+            processedThread.lastMessageId = msg.id;
+            processedThread.messageCount += 1;
+            processedThread.lastProcessedAt = new Date();
+            await processedThread.save();
+          }
           console.log(`Updated event ${existingEvent.calendarEventId}`);
 
         } else if (aiResponse.action === 'CANCEL' && existingEvent) {
-          await deleteEvent(user, existingEvent.calendarEventId);
+          if (existingEvent.calendarEventId) {
+            await deleteEvent(user, existingEvent.calendarEventId);
+          }
 
           existingEvent.history.push({
             action: 'cancelled',
@@ -253,31 +322,53 @@ export const pollAccount = async (account) => {
           existingEvent.status = 'cancelled';
           await existingEvent.save();
 
-          processedThread.lastMessageId = msg.id;
-          processedThread.messageCount += 1;
-          processedThread.status = 'cancelled';
-          processedThread.lastProcessedAt = new Date();
-          await processedThread.save();
+          if (processedThread) {
+            processedThread.lastMessageId = msg.id;
+            processedThread.messageCount += 1;
+            processedThread.status = 'cancelled';
+            processedThread.lastProcessedAt = new Date();
+            await processedThread.save();
+          }
           console.log(`Cancelled event ${existingEvent.calendarEventId}`);
 
         } else if (aiResponse.action === 'NO_EVENT') {
-          // Do not write non-event emails to database to save space
-          console.log(`No event detected for thread ${threadId} (skipping DB insert)`);
+          console.log(`No event detected for thread ${threadId}`);
+          if (processedThread) {
+            processedThread.lastMessageId = msg.id;
+            processedThread.lastProcessedAt = new Date();
+            await processedThread.save();
+          }
         }
       } catch (err) {
         console.error(`Error processing message ${msg.id}:`, err);
-        // Continue with other messages
       }
     }
 
-    account.lastHistoryId = newHistoryId;
+    account.lastHistoryId = newHistoryId || account.lastHistoryId;
     account.lastPolledAt = new Date();
     await account.save();
-    console.log(`Finished polling ${account.email}`);
+    console.log(`Finished polling ${account.email}. Created ${createdEventsCount} events.`);
 
+    return { createdCount: createdEventsCount };
   } catch (error) {
     console.error(`Error polling account ${account.email}:`, error);
+    return { createdCount: 0 };
   }
+};
+
+/**
+ * Manually scans all active inboxes for a given user
+ * @param {string} userId 
+ * @returns {Promise<{ success: boolean, createdEvents: number }>}
+ */
+export const scanUserInboxes = async (userId) => {
+  const accounts = await GmailAccount.find({ userId, isActive: true });
+  let totalCreated = 0;
+  for (const account of accounts) {
+    const res = await pollAccount(account, true);
+    totalCreated += (res?.createdCount || 0);
+  }
+  return { success: true, createdEvents: totalCreated };
 };
 
 /**
@@ -290,10 +381,11 @@ export const startPolling = () => {
     try {
       const accounts = await GmailAccount.find({ isActive: true });
       for (const account of accounts) {
-        await pollAccount(account);
+        await pollAccount(account, false);
       }
     } catch (error) {
       console.error('Error fetching accounts for polling:', error);
     }
   });
 };
+
