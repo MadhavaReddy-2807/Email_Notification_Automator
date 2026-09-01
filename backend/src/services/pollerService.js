@@ -184,9 +184,18 @@ export const pollAccount = async (account, fullInboxScan = false) => {
     let messages = [];
     let newHistoryId = null;
 
-    if (fullInboxScan || !account.lastHistoryId) {
-      // Scan inbox messages
-      messages = await getInboxMessages(account, 30);
+    if (!account.lastHistoryId) {
+      // New account setup: Initialize historyId baseline directly from profile without burning quota on past 30 emails
+      console.log(`[Account Setup] Initializing baseline historyId for new account ${account.email}...`);
+      const profile = await gmailClient.users.getProfile({ userId: 'me' });
+      account.lastHistoryId = profile.data.historyId;
+      account.lastPolledAt = new Date();
+      await account.save();
+      console.log(`[Account Setup] Baseline set for ${account.email}. Only future incoming emails will be checked.`);
+      return { createdCount: 0 };
+    } else if (fullInboxScan) {
+      // Explicit manual user-triggered scan
+      messages = await getInboxMessages(account, 10);
     } else {
       const historyRes = await getHistoryChanges(account);
       messages = historyRes.messages || [];
@@ -194,7 +203,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
       // If history changes returned 0, double check recent inbox messages
       if (messages.length === 0) {
-        const recentInbox = await getInboxMessages(account, 10);
+        const recentInbox = await getInboxMessages(account, 5);
         // Filter for messages not yet processed in ProcessedThread
         for (const inboxMsg of recentInbox) {
           const exists = await ProcessedThread.findOne({
