@@ -1,17 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config/index.js';
 
+const FALLBACK_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+
 /**
- * Helper to call Gemini and parse JSON
+ * Helper to call Gemini and parse JSON with automatic model failover
  * @param {string} prompt 
  * @returns {Promise<Object>}
  */
-const callGemini = async (prompt, retries = 2, delayMs = 2500) => {
-    try {
-        const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
-        
-        const fullPrompt = `You are an AI assistant specialized in deeply parsing emails to extract rich, comprehensive calendar events.
+const callGemini = async (prompt) => {
+    const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
+    const fullPrompt = `You are an AI assistant specialized in deeply parsing emails to extract rich, comprehensive calendar events.
 Respond ONLY with a valid JSON object matching this schema. Do not add markdown code blocks or commentary:
 {
   "action": "CREATE" | "RESCHEDULE" | "CANCEL" | "NO_EVENT",
@@ -54,29 +53,30 @@ Comprehensive Extraction Guidelines:
 
 ${prompt}`;
 
-        const result = await model.generateContent(fullPrompt);
-        const rawText = result.response.text();
-        const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-        const parsed = JSON.parse(cleaned);
+    for (const modelName of FALLBACK_MODELS) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(fullPrompt);
+            const rawText = result.response.text();
+            const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const parsed = JSON.parse(cleaned);
 
-        // Normalize single "event" into "events" array if needed
-        if (parsed.event && (!parsed.events || parsed.events.length === 0)) {
-            parsed.events = [parsed.event];
-        }
-        if (!parsed.events) {
-            parsed.events = [];
-        }
+            // Normalize single "event" into "events" array if needed
+            if (parsed.event && (!parsed.events || parsed.events.length === 0)) {
+                parsed.events = [parsed.event];
+            }
+            if (!parsed.events) {
+                parsed.events = [];
+            }
 
-        return parsed;
-    } catch (error) {
-        if ((error.status === 429 || error.message?.includes('429')) && retries > 0) {
-            console.log(`Gemini rate limited (429), waiting ${delayMs / 1000}s before retry...`);
-            await new Promise(r => setTimeout(r, delayMs));
-            return callGemini(prompt, retries - 1, delayMs * 2);
+            return parsed;
+        } catch (error) {
+            console.warn(`Model ${modelName} encountered error/rate limit: ${error.message?.substring(0, 100)}. Trying fallback model...`);
         }
-        console.error("Gemini parsing error:", error);
-        return { action: 'NO_EVENT', confidence: 0, reasoning: "Error communicating with AI or parsing response", events: [] };
     }
+
+    console.error("All Gemini fallback models exhausted for parsing.");
+    return { action: 'NO_EVENT', confidence: 0, reasoning: "All AI model quotas temporarily rate limited", events: [] };
 };
 
 /**
@@ -89,88 +89,112 @@ export const analyzeEmail = async (emailContent, existingEvent = null) => {
     let prompt = `Analyze this email (Sent Date: ${emailContent.date}):\nSubject: ${emailContent.subject}\nFrom: ${emailContent.from}\nDate: ${emailContent.date}\nBody: ${emailContent.body}\n`;
     
     if (existingEvent) {
-        prompt += `\nExisting Event Context:\n${JSON.stringify(existingEvent, null, 2)}`;
+        prompt += `\nExisting Event in Database:
+Title: ${existingEvent.title}
+Start: ${existingEvent.startTime}
+End: ${existingEvent.endTime}
+Status: ${existingEvent.status}
+
+Determine if this email is a RESCHEDULE, CANCEL, or unrelated (NO_EVENT) for the existing event.`;
     }
     
-    return callGemini(prompt);
+    return await callGemini(prompt);
 };
 
 /**
- * Sends full thread context to Gemini
- * @param {Array<Object>} threadMessages - Array of parsed messages in the thread
+ * Sends entire thread to Gemini for contextual analysis
+ * @param {Array<Object>} threadMessages - Array of parsed messages
  * @param {Object|null} existingEvent - Existing event data if available
  * @returns {Promise<Object>}
  */
 export const analyzeThread = async (threadMessages, existingEvent = null) => {
-    let prompt = `Analyze this email thread:\n\n`;
+    let prompt = 'Analyze the following email thread context chronologically:\n\n';
     threadMessages.forEach((msg, idx) => {
-        prompt += `--- Message ${idx + 1} ---\nSubject: ${msg.subject}\nFrom: ${msg.from}\nDate: ${msg.date}\nBody: ${msg.body}\n\n`;
+        prompt += `--- Message ${idx + 1} (From: ${msg.from}, Date: ${msg.date}) ---\nSubject: ${msg.subject}\nBody: ${msg.body}\n\n`;
     });
     
     if (existingEvent) {
-        prompt += `\nExisting Event Context:\n${JSON.stringify(existingEvent, null, 2)}`;
+        prompt += `Existing Event in Database:
+Title: ${existingEvent.title}
+Start: ${existingEvent.startTime}
+End: ${existingEvent.endTime}
+Status: ${existingEvent.status}
+
+Determine if the latest message is a RESCHEDULE, CANCEL, or unrelated for the existing event.`;
     }
     
-    return callGemini(prompt);
+    return await callGemini(prompt);
 };
 
 /**
- * Uses Gemini to detect if a candidate event is a duplicate of an existing event
- * @param {Object} candidateEvent - { title, date, startTime, endTime, location }
- * @param {Array<Object>} existingEvents - List of existing events
+ * Checks if a candidate event is a duplicate of any existing events
+ * @param {Object} candidateEvent - Event extracted from AI
+ * @param {Array<Object>} existingEvents - List of existing calendar events
  * @returns {Promise<{ isDuplicate: boolean, duplicateEventId: string|null, reasoning: string }>}
  */
-export const checkIsDuplicateWithGemini = async (candidateEvent, existingEvents) => {
+export const checkIsDuplicateWithGemini = async (candidateEvent, existingEvents = []) => {
     if (!existingEvents || existingEvents.length === 0) {
-        return { isDuplicate: false, duplicateEventId: null, reasoning: "No existing events to compare against." };
+        return { isDuplicate: false, duplicateEventId: null, reasoning: 'No existing events found in time window' };
     }
 
-    try {
-        const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+    const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
 
-        const prompt = `You are a Calendar Assistant checking for duplicate events.
+    const prompt = `You are a Calendar Assistant checking for duplicate events.
 Candidate Event to Add:
-${JSON.stringify(candidateEvent, null, 2)}
+Title: ${candidateEvent.title}
+Date: ${candidateEvent.date}
+Start Time: ${candidateEvent.startTime}
+End Time: ${candidateEvent.endTime}
+Location: ${candidateEvent.location || ''}
+Description: ${candidateEvent.description || ''}
 
-Existing Events on Calendar:
+Existing Events around this time:
 ${JSON.stringify(existingEvents.map(e => ({
-    id: e._id || e.id || e.calendarEventId,
+    id: e.id || e._id,
     title: e.title || e.summary,
-    startTime: e.startTime || e.start,
-    endTime: e.endTime || e.end,
+    startTime: e.startTime || e.start?.dateTime || e.start?.date,
+    endTime: e.endTime || e.end?.dateTime || e.end?.date,
     location: e.location
 })), null, 2)}
 
-Determine if the Candidate Event is a duplicate or same meeting/class as any existing event.
-Respond ONLY with a valid JSON object matching this schema:
+Determine if the Candidate Event represents the EXACT SAME real-world event/class as any existing event.
+Respond ONLY with a JSON object:
 {
   "isDuplicate": true | false,
   "duplicateEventId": "string or null",
-  "reasoning": "string"
+  "reasoning": "brief explanation"
 }`;
 
-        const result = await model.generateContent(prompt);
-        const cleaned = result.response.text().replace(/```json/gi, '').replace(/```/g, '').trim();
-        return JSON.parse(cleaned);
-    } catch (err) {
-        console.warn("Gemini duplicate check fallback to time/title matching:", err.message);
-        // Fallback: check exact date and start time match with similar title
-        const candidateDateStr = candidateEvent.date || (candidateEvent.startTime ? new Date(candidateEvent.startTime).toISOString().split('T')[0] : '');
-        const candidateTitleNorm = (candidateEvent.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-        for (const existing of existingEvents) {
-            const existingDateStr = existing.startTime ? new Date(existing.startTime).toISOString().split('T')[0] : '';
-            const existingTitleNorm = (existing.title || existing.summary || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            if (candidateDateStr && existingDateStr === candidateDateStr && (candidateTitleNorm.includes(existingTitleNorm) || existingTitleNorm.includes(candidateTitleNorm))) {
-                return {
-                    isDuplicate: true,
-                    duplicateEventId: existing._id?.toString() || existing.id || existing.calendarEventId,
-                    reasoning: "Matched by date and title similarity"
-                };
-            }
+    for (const modelName of FALLBACK_MODELS) {
+        try {
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            const rawText = result.response.text();
+            const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            return JSON.parse(cleaned);
+        } catch (error) {
+            console.warn(`Duplicate check on model ${modelName} failed: ${error.message?.substring(0, 80)}. Trying fallback...`);
         }
-        return { isDuplicate: false, duplicateEventId: null, reasoning: "Fallback check found no duplicate." };
     }
+
+    console.log(`Gemini duplicate check fallback to time/title matching`);
+    const candidateTitle = (candidateEvent.title || '').toLowerCase().trim();
+    const candidateDate = candidateEvent.date || '';
+
+    const match = existingEvents.find(e => {
+        const title = (e.title || e.summary || '').toLowerCase().trim();
+        const start = String(e.startTime || e.start?.dateTime || e.start?.date || '');
+        return (title.includes(candidateTitle) || candidateTitle.includes(title)) && (!candidateDate || start.includes(candidateDate));
+    });
+
+    if (match) {
+        return {
+            isDuplicate: true,
+            duplicateEventId: match.id || match._id,
+            reasoning: 'Matched by date and title similarity (algorithmic fallback)'
+        };
+    }
+
+    return { isDuplicate: false, duplicateEventId: null, reasoning: 'No duplicate match found' };
 };
 
