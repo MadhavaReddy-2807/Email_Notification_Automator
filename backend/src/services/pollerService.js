@@ -476,8 +476,9 @@ export const pollAccount = async (account, fullInboxScan = false) => {
                 endTime: eventItem.endTime
               });
               calendarEventId = calendarResult?.id || calendarResult;
-              if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
-              if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
+              // Note: intentionally NOT overwriting eventStart/eventEnd with calendarResult.startDateTime/endDateTime.
+              // The fallbackStart/fallbackEnd from parseEventDates are the canonical local-time dates.
+              // calendarResult.startDateTime goes through new Date() conversion which can cause timezone drift.
             }
 
             const newEvent = new Event({
