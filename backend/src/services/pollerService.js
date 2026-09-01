@@ -463,25 +463,22 @@ export const pollAccount = async (account, fullInboxScan = false) => {
             console.log(`[Poller] Successfully created event "${newEvent.title}" (${calendarEventId}) on ${eventStart}`);
           }
 
-          // Create or update ProcessedThread record
-          if (!processedThread) {
-            const newThreadRecord = new ProcessedThread({
-              userId: user._id,
-              accountId: account._id,
-              gmailThreadId: threadId,
-              lastMessageId: msg.id,
-              messageCount: 1,
-              linkedEvent: lastCreatedEventId,
-              status: 'active',
-              threadSnippet: eventsToProcess[0]?.title || parsedSubject || 'Calendar Event'
-            });
-            await newThreadRecord.save();
-          } else {
-            processedThread.lastMessageId = msg.id;
-            processedThread.lastProcessedAt = new Date();
-            if (lastCreatedEventId) processedThread.linkedEvent = lastCreatedEventId;
-            await processedThread.save();
-          }
+          // Commit ProcessedThread record atomically (even if all events were duplicates/skipped)
+          await ProcessedThread.findOneAndUpdate(
+            { accountId: account._id, gmailThreadId: threadId },
+            {
+              $set: {
+                userId: user._id,
+                lastMessageId: msg.id,
+                lastProcessedAt: new Date(),
+                status: 'active',
+                threadSnippet: eventsToProcess[0]?.title || parsedSubject || 'Calendar Event',
+                ...(lastCreatedEventId ? { linkedEvent: lastCreatedEventId } : {})
+              },
+              $setOnInsert: { firstProcessedAt: new Date(), messageCount: 1 }
+            },
+            { upsert: true, new: true }
+          );
 
         } else if (aiResponse.action === 'RESCHEDULE' && eventsToProcess.length > 0) {
           const eventItem = eventsToProcess[0];
