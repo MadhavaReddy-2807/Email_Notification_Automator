@@ -255,11 +255,17 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
         if (processedThread) {
           const threadData = await getThread(gmailClient, threadId);
-          parsedMessages = (threadData.messages || []).map(parseEmailContent);
+          if (!threadData || !threadData.messages) {
+            continue; // Thread was deleted or moved
+          }
+          parsedMessages = threadData.messages.map(parseEmailContent);
           latestParsedMessage = parsedMessages[parsedMessages.length - 1] || parsedMessages[0] || {};
           parsedSubject = parsedMessages[0]?.subject || 'No Subject';
         } else {
           const messageData = await getMessage(gmailClient, msg.id);
+          if (!messageData) {
+            continue; // Message was deleted or moved
+          }
           latestParsedMessage = parseEmailContent(messageData);
           parsedSubject = latestParsedMessage.subject || 'No Subject';
         }

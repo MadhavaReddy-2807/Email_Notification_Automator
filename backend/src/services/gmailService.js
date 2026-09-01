@@ -133,6 +133,10 @@ export const getMessage = async (gmailClient, messageId) => {
         });
         return response.data;
     } catch (error) {
+        if (error.code === 404 || error.status === 404 || error.message?.includes('notFound')) {
+            console.log(`[Gmail] Message ${messageId} no longer exists in mailbox (deleted or moved). Skipping.`);
+            return null;
+        }
         console.error(`Error fetching message ${messageId}:`, error);
         throw error;
     }
@@ -153,6 +157,10 @@ export const getThread = async (gmailClient, threadId) => {
         });
         return response.data;
     } catch (error) {
+        if (error.code === 404 || error.status === 404 || error.message?.includes('notFound')) {
+            console.log(`[Gmail] Thread ${threadId} no longer exists in mailbox. Skipping.`);
+            return null;
+        }
         console.error(`Error fetching thread ${threadId}:`, error);
         throw error;
     }
