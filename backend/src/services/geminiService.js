@@ -87,8 +87,11 @@ Comprehensive Extraction Guidelines:
     * 📚 Preparation / Prerequisites / Attached materials or Google Drive / Form links.
     * 👤 Host / Speaker / Professor details.
 - "date": Concrete date in YYYY-MM-DD format based on the email context and send date.
-- "startTime": 24-hour format HH:MM representing the exact local time in the email (e.g., "09:00", "12:30", "14:30", "18:00"). If the email says "12:30 PM" (afternoon), output "12:30". If it says "12:30 AM" (midnight), output "00:30". If it says "6:00 PM", output "18:00". Do NOT convert to UTC or apply any timezone shifts.
-- "endTime": 24-hour format HH:MM. If omitted in email, set to 1 hour after startTime.
+- "startTime": 24-hour military format HH:MM representing the exact local time in the email.
+    * Examples: "4:30 PM" -> "16:30", "5:00 PM" -> "17:00", "2:00 PM" -> "14:00", "10:30 AM" -> "10:30", "12:00 PM" -> "12:00", "12:30 AM" -> "00:30".
+    * NEVER output "04:30" or "4:30" for 4:30 PM! Always convert PM afternoon/evening times to 24-hour (add 12 hours).
+    * Do NOT convert to UTC or apply timezone offsets.
+- "endTime": 24-hour format HH:MM. If omitted in email, set to 1 hour after startTime (e.g. if startTime is "16:30", endTime is "17:30").
 
 ${prompt}`;
 
