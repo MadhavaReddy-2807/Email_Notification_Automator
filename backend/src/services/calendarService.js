@@ -30,42 +30,55 @@ export const getCalendarClient = async (user) => {
 /**
  * Fetch the primary calendar timezone for the user
  * @param {import('googleapis').calendar_v3.Calendar} calendar
- * @returns {Promise<string>} Timezone string e.g. 'Asia/Kolkata' or 'UTC'
+ * @param {Object} [user] - User document
+ * @returns {Promise<string>} Timezone string e.g. 'Asia/Kolkata'
  */
-export const getUserTimeZone = async (calendar) => {
+export const getUserTimeZone = async (calendar, user = null) => {
+    if (user?.settings?.timeZone) {
+        return user.settings.timeZone;
+    }
     try {
         const res = await calendar.calendars.get({ calendarId: 'primary' });
-        return res.data?.timeZone || 'UTC';
+        if (res.data?.timeZone && res.data.timeZone !== 'UTC') {
+            return res.data.timeZone;
+        }
+        const settingRes = await calendar.settings.get({ setting: 'timezone' });
+        if (settingRes.data?.value && settingRes.data.value !== 'UTC') {
+            return settingRes.data.value;
+        }
+        return res.data?.timeZone || 'Asia/Kolkata';
     } catch (err) {
-        console.warn('Could not fetch calendar timezone, defaulting to UTC:', err?.message);
-        return 'UTC';
+        return 'Asia/Kolkata';
     }
 };
 
 /**
- * Format date and time to strings suitable for Google Calendar API with timezone support
+ * Format date and time to strings suitable for Google Calendar API with exact timezone preservation
+ * Never appends 'Z' which causes Google Calendar to force UTC conversions.
  * @param {string} [dateStr] - YYYY-MM-DD
  * @param {string|Date} [timeOrDate] - HH:MM, HH:MM:SS or Date object / ISO string
- * @param {string} [timeZone] - User timezone (e.g. 'Asia/Kolkata')
+ * @param {string} [timeZone] - User timezone (defaults to 'Asia/Kolkata')
  * @returns {Object} Start/end object for Google Calendar
  */
-export const formatEventTime = (dateStr, timeOrDate, timeZone = null) => {
-    if (timeOrDate instanceof Date) {
-        return { dateTime: isNaN(timeOrDate.getTime()) ? new Date().toISOString() : timeOrDate.toISOString() };
+export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') => {
+    const targetZone = timeZone || 'Asia/Kolkata';
+    let baseDate = dateStr;
+    if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) {
+        baseDate = new Date().toISOString().split('T')[0];
     }
+
+    if (timeOrDate instanceof Date) {
+        const hours = String(timeOrDate.getHours()).padStart(2, '0');
+        const minutes = String(timeOrDate.getMinutes()).padStart(2, '0');
+        const seconds = String(timeOrDate.getSeconds()).padStart(2, '0');
+        const localIso = `${baseDate}T${hours}:${minutes}:${seconds}`;
+        return { dateTime: localIso, timeZone: targetZone };
+    }
+
     if (typeof timeOrDate === 'string') {
         const trimmed = timeOrDate.trim();
-        // If already a full ISO string with timezone offset or UTC Z
-        if (trimmed.includes('T') && (trimmed.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(trimmed))) {
-            const parsed = new Date(trimmed);
-            if (!isNaN(parsed.getTime())) return { dateTime: parsed.toISOString() };
-        }
-        
-        let baseDate = dateStr;
-        if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) {
-            baseDate = new Date().toISOString().split('T')[0];
-        }
 
+        // 12-hour or 24-hour match (e.g., "17:45", "5:45 PM", "09:00", "11:15")
         const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
         if (match) {
             let hours = parseInt(match[1], 10);
@@ -77,22 +90,23 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = null) => {
 
             const timeFormatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
             const localIso = `${baseDate}T${timeFormatted}`;
-            return timeZone ? { dateTime: localIso, timeZone } : { dateTime: localIso };
+            return { dateTime: localIso, timeZone: targetZone };
         }
 
         if (trimmed.includes('T')) {
-            return timeZone ? { dateTime: trimmed, timeZone } : { dateTime: trimmed };
+            // Strip any trailing Z to prevent Google Calendar from forcing UTC
+            const cleanIso = trimmed.replace(/Z$/i, '');
+            return { dateTime: cleanIso, timeZone: targetZone };
         }
 
-        const direct = new Date(`${baseDate}T${trimmed}`);
-        if (!isNaN(direct.getTime())) {
-            return timeZone ? { dateTime: `${baseDate}T${trimmed}`, timeZone } : { dateTime: direct.toISOString() };
-        }
+        const localIso = `${baseDate}T${trimmed.padStart(5, '0')}:00`;
+        return { dateTime: localIso, timeZone: targetZone };
     }
+
     if (dateStr && !timeOrDate) {
         return { date: dateStr }; // All-day event
     }
-    return { dateTime: new Date().toISOString() };
+    return { dateTime: `${baseDate}T09:00:00`, timeZone: targetZone };
 };
 
 /**
@@ -103,7 +117,7 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = null) => {
  */
 export const createEvent = async (user, eventData) => {
     const calendar = await getCalendarClient(user);
-    const timeZone = await getUserTimeZone(calendar);
+    const timeZone = await getUserTimeZone(calendar, user);
     
     let startTime = eventData.startTime;
     let endTime = eventData.endTime;
@@ -200,7 +214,7 @@ export const createEvent = async (user, eventData) => {
  */
 export const updateEvent = async (user, calendarEventId, eventData) => {
     const calendar = await getCalendarClient(user);
-    const timeZone = await getUserTimeZone(calendar);
+    const timeZone = await getUserTimeZone(calendar, user);
     
     let startTime = eventData.startTime;
     let endTime = eventData.endTime;
