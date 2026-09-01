@@ -193,7 +193,23 @@ ${prompt}`;
  * @returns {Promise<Object>}
  */
 export const analyzeEmail = async (emailContent, existingEvent = null) => {
-    let prompt = `Analyze this email (Sent Date: ${emailContent.date}):\nSubject: ${emailContent.subject}\nFrom: ${emailContent.from}\nDate: ${emailContent.date}\nBody: ${emailContent.body}\n`;
+    const nowLocal = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(new Date());
+
+    let prompt = `Current Local Reference Time (Asia/Kolkata): ${nowLocal}
+Analyze this email (Sent Date: ${emailContent.date}):
+Subject: ${emailContent.subject}
+From: ${emailContent.from}
+Email Header Date: ${emailContent.date}
+Body: ${emailContent.body}
+`;
     
     if (existingEvent) {
         prompt += `\nExisting Event in Database:
@@ -215,7 +231,17 @@ Determine if this email is a RESCHEDULE, CANCEL, or unrelated (NO_EVENT) for the
  * @returns {Promise<Object>}
  */
 export const analyzeThread = async (threadMessages, existingEvent = null) => {
-    let prompt = 'Analyze the following email thread context chronologically:\n\n';
+    const nowLocal = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).format(new Date());
+
+    let prompt = `Current Local Reference Time (Asia/Kolkata): ${nowLocal}\nAnalyze the following email thread context chronologically:\n\n`;
     threadMessages.forEach((msg, idx) => {
         prompt += `--- Message ${idx + 1} (From: ${msg.from}, Date: ${msg.date}) ---\nSubject: ${msg.subject}\nBody: ${msg.body}\n\n`;
     });

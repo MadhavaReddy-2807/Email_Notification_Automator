@@ -89,7 +89,7 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
         const min = getPart('minute');
         const s = getPart('second');
 
-        const localIso = `${y}-${m}-${d}T${h}:${min}:${s}`;
+        const localIso = `${y}-${m}-${d}T${h}:${min}:${s}${offsetStr}`;
         return { dateTime: localIso, timeZone: targetZone };
     }
 
