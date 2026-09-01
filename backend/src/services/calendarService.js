@@ -136,10 +136,30 @@ export const createEvent = async (user, eventData) => {
         delete start.date;
     }
 
+    let finalLocation = eventData.location || '';
+    if (eventData.meetingLink) {
+        if (finalLocation && !finalLocation.includes(eventData.meetingLink)) {
+            finalLocation = `${finalLocation} | ${eventData.meetingLink}`;
+        } else {
+            finalLocation = eventData.meetingLink;
+        }
+    }
+
+    let fullDescription = eventData.description || '';
+    if (eventData.meetingLink && !fullDescription.includes(eventData.meetingLink)) {
+        fullDescription = `🔗 Join Meeting: ${eventData.meetingLink}\n\n${fullDescription}`;
+    }
+    if (eventData.importantNotes && !fullDescription.includes(eventData.importantNotes)) {
+        fullDescription += `\n\n📌 Important Notes:\n${eventData.importantNotes}`;
+    }
+    if (eventData.organizer && !fullDescription.includes(eventData.organizer)) {
+        fullDescription += `\n\n👤 Organizer: ${eventData.organizer}`;
+    }
+
     const event = {
         summary: eventData.title,
-        location: eventData.location,
-        description: eventData.description,
+        location: finalLocation,
+        description: fullDescription.trim(),
         start,
         end,
         reminders: {
@@ -211,10 +231,30 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
         delete start.date;
     }
 
+    let finalLocation = eventData.location || '';
+    if (eventData.meetingLink) {
+        if (finalLocation && !finalLocation.includes(eventData.meetingLink)) {
+            finalLocation = `${finalLocation} | ${eventData.meetingLink}`;
+        } else {
+            finalLocation = eventData.meetingLink;
+        }
+    }
+
+    let fullDescription = eventData.description || '';
+    if (eventData.meetingLink && !fullDescription.includes(eventData.meetingLink)) {
+        fullDescription = `🔗 Join Meeting: ${eventData.meetingLink}\n\n${fullDescription}`;
+    }
+    if (eventData.importantNotes && !fullDescription.includes(eventData.importantNotes)) {
+        fullDescription += `\n\n📌 Important Notes:\n${eventData.importantNotes}`;
+    }
+    if (eventData.organizer && !fullDescription.includes(eventData.organizer)) {
+        fullDescription += `\n\n👤 Organizer: ${eventData.organizer}`;
+    }
+
     const event = {
         summary: eventData.title,
-        location: eventData.location,
-        description: eventData.description,
+        location: finalLocation,
+        description: fullDescription.trim(),
         start,
         end,
         reminders: {

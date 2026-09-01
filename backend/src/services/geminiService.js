@@ -11,7 +11,7 @@ const callGemini = async (prompt, retries = 2, delayMs = 2500) => {
         const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
         const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
         
-        const fullPrompt = `You are an AI assistant specialized in parsing emails to extract calendar events.
+        const fullPrompt = `You are an AI assistant specialized in deeply parsing emails to extract rich, comprehensive calendar events.
 Respond ONLY with a valid JSON object matching this schema. Do not add markdown code blocks or commentary:
 {
   "action": "CREATE" | "RESCHEDULE" | "CANCEL" | "NO_EVENT",
@@ -23,25 +23,34 @@ Respond ONLY with a valid JSON object matching this schema. Do not add markdown 
       "startTime": "HH:MM",
       "endTime": "HH:MM",
       "location": "string",
-      "description": "string"
+      "meetingLink": "string or null",
+      "description": "string",
+      "organizer": "string or null",
+      "importantNotes": "string or null"
     }
   ],
   "reasoning": "string"
 }
 
 Actions:
-- CREATE: One or more new events/classes/sessions are being proposed/scheduled.
-- RESCHEDULE: An existing event is being modified.
+- CREATE: One or more new events/classes/sessions/meetings/webinars are being proposed/scheduled.
+- RESCHEDULE: An existing event is being modified or moved to a new time/date.
 - CANCEL: An existing event is being cancelled.
-- NO_EVENT: No clear event information found.
+- NO_EVENT: No clear calendar event information found.
 
-Extraction Guidelines:
-- "events": If an email mentions multiple days or times (for example: "Tuesday, Wednesday, and Friday 9:00 AM to 10:00 AM, Saturday 10:00 AM to 12:00 Noon"), create a separate event entry for EACH distinct occurrence with its specific calculated date in YYYY-MM-DD format!
-- "title": Extract the full, clean name of the event or class (e.g., "Ubiquitous Computing Class", "Maths Class"). Do not truncate or drop any initial letters.
-- "date": Concrete date in YYYY-MM-DD format based on the email context/email send date. Calculate the exact day for mentioned days of week (e.g. Tuesday, Wednesday, etc.).
-- "startTime": 24-hour format HH:MM representing the exact local time stated in the email (e.g., "09:00" for 9:00 AM, "19:30" for 7:30 PM). Do NOT convert to UTC.
-- "endTime": 24-hour format HH:MM. If omitted or not mentioned, provide 1 hour after startTime.
-- "location": Physical location (e.g. "LT-31"), room number, or meeting link (Zoom/Meet/Teams) if present.
+Comprehensive Extraction Guidelines:
+- "events": If an email mentions multiple days or sessions (e.g. "Tuesday, Wednesday, Friday 9:00-10:00 AM, Saturday 10:00 AM-12:00 PM"), create a separate event entry for EACH distinct occurrence with its concrete calculated date in YYYY-MM-DD format!
+- "title": Extract the full, professional name of the event, meeting, or class (e.g. "Ubiquitous Computing Class", "AI Automation Webinar", "Maths Class"). Do not truncate or omit words.
+- "meetingLink": Extract any video conference, webinar, or meeting URL (Google Meet, Zoom, MS Teams, Webex, YouTube Live) along with any Passcodes/Meeting IDs found in the email.
+- "location": Physical room/hall (e.g. "LT-31", "Auditorium 2") OR the meeting link if online. If both exist, specify the room as location.
+- "description": Construct a complete, formatted, highly detailed overview including:
+    * 📋 Agenda & Topics: What will be discussed or taught.
+    * 🔗 Join Link & Passcode: Full meeting URL, Meeting ID, and Passcode if available.
+    * 📚 Preparation / Prerequisites / Attached materials or Google Drive / Form links.
+    * 👤 Host / Speaker / Professor details.
+- "date": Concrete date in YYYY-MM-DD format based on the email context and send date.
+- "startTime": 24-hour format HH:MM representing the exact local time in the email (e.g., "09:00", "19:30"). Do NOT convert to UTC.
+- "endTime": 24-hour format HH:MM. If omitted in email, set to 1 hour after startTime.
 
 ${prompt}`;
 

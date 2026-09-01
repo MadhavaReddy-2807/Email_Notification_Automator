@@ -213,14 +213,33 @@ export const pollAccount = async (account, fullInboxScan = false) => {
               continue;
             }
 
-            let calendarEventId = null;
-            let eventStart = fallbackStart;
-            let eventEnd = fallbackEnd;
+            let fullDescription = eventItem.description || '';
+            if (eventItem.meetingLink && !fullDescription.includes(eventItem.meetingLink)) {
+              fullDescription = `🔗 Join Meeting: ${eventItem.meetingLink}\n\n${fullDescription}`;
+            }
+            if (eventItem.importantNotes && !fullDescription.includes(eventItem.importantNotes)) {
+              fullDescription += `\n\n📌 Notes: ${eventItem.importantNotes}`;
+            }
+            if (eventItem.organizer && !fullDescription.includes(eventItem.organizer)) {
+              fullDescription += `\n\n👤 Host: ${eventItem.organizer}`;
+            }
+
+            let fullLocation = eventItem.location || '';
+            if (eventItem.meetingLink) {
+              if (fullLocation && !fullLocation.includes(eventItem.meetingLink)) {
+                fullLocation = `${fullLocation} | ${eventItem.meetingLink}`;
+              } else {
+                fullLocation = eventItem.meetingLink;
+              }
+            }
 
             // Auto-add to Google Calendar
             if (user.settings?.autoAdd !== false) {
               const calendarResult = await createEvent(user, {
                 ...eventItem,
+                description: fullDescription.trim(),
+                location: fullLocation,
+                meetingLink: eventItem.meetingLink,
                 date: eventItem.date,
                 startTime: eventItem.startTime,
                 endTime: eventItem.endTime
@@ -235,8 +254,8 @@ export const pollAccount = async (account, fullInboxScan = false) => {
               threadId: processedThread?._id,
               calendarEventId: calendarEventId ? String(calendarEventId) : null,
               title: eventItem.title || 'Scheduled Event',
-              description: eventItem.description || '',
-              location: eventItem.location || '',
+              description: fullDescription.trim(),
+              location: fullLocation,
               startTime: eventStart,
               endTime: eventEnd,
               status: 'scheduled',

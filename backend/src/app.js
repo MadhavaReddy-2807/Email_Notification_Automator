@@ -69,12 +69,21 @@ const startServer = async () => {
   // Connect to Database
   await connectDB();
 
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     console.log(`Server running in ${config.nodeEnv} mode on port ${config.port}`);
     
     // Start polling service
     console.log('Starting polling service...');
     startPolling();
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n⚠️  Port ${config.port} is already in use by another process.`);
+      console.error(`👉 Stop the existing process or use a different port in .env.\n`);
+    } else {
+      console.error('Server error:', err);
+    }
   });
 };
 
