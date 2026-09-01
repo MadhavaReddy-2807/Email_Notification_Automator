@@ -63,22 +63,6 @@ const Events = () => {
     }
   };
 
-  const handleCleanupPast = async () => {
-    try {
-      setCleaning(true);
-      toast.loading('Cleaning up past ended events from database...', { id: 'cleanToast' });
-      const res = await eventsApi.cleanupPast(0);
-      if (res.data?.success) {
-        toast.success(res.data.message || 'Cleaned up past events!', { id: 'cleanToast' });
-        fetchEvents(1, statusFilter);
-      }
-    } catch (err) {
-      toast.error('Failed to clean up past events', { id: 'cleanToast' });
-    } finally {
-      setCleaning(false);
-    }
-  };
-
   useEffect(() => {
     fetchEvents(1, statusFilter);
   }, [statusFilter]);
@@ -149,20 +133,10 @@ const Events = () => {
             <button 
               className="btn btn-primary btn-icon-text"
               onClick={handleScanInboxes}
-              disabled={scanning || loading || cleaning}
+              disabled={scanning || loading}
             >
               <FiRefreshCw className={scanning ? 'spin' : ''} />
               <span>{scanning ? 'Scanning...' : 'Scan Inboxes'}</span>
-            </button>
-
-            <button 
-              className="btn btn-secondary btn-icon-text"
-              onClick={handleCleanupPast}
-              disabled={cleaning || loading || scanning}
-              title="Remove expired/past meetings from database"
-            >
-              <FiTrash2 className={cleaning ? 'spin' : ''} />
-              <span>{cleaning ? 'Cleaning...' : 'Prune Past Events'}</span>
             </button>
 
             <select
@@ -179,7 +153,7 @@ const Events = () => {
             <button 
               className="btn btn-secondary btn-icon-text"
               onClick={() => fetchEvents(pagination.page)}
-              disabled={loading || scanning || cleaning}
+              disabled={loading || scanning}
             >
               <FiRefreshCw className={loading ? 'spin' : ''} />
               <span>Refresh</span>

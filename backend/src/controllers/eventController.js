@@ -10,6 +10,9 @@ import * as calendarService from '../services/calendarService.js';
 export const getEventStats = async (req, res) => {
   try {
     const userId = req.user._id;
+    // Automatically prune past/expired events from database
+    await Event.deleteMany({ userId, endTime: { $lt: new Date() } });
+
     const [
       totalEvents,
       syncedEvents,
@@ -55,14 +58,19 @@ export const getEventStats = async (req, res) => {
 
 /**
  * List events for the current user with pagination and optional status filter
+ * Automatically prunes past expired events so user never sees old meetings
  */
 export const listEvents = async (req, res) => {
   try {
+    const userId = req.user._id;
+    // Automatically prune past/expired events
+    await Event.deleteMany({ userId, endTime: { $lt: new Date() } });
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const query = { userId: req.user._id };
+    const query = { userId, endTime: { $gte: new Date() } };
     if (req.query.status) {
       query.status = req.query.status;
     }

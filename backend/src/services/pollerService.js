@@ -463,10 +463,11 @@ export const startPolling = () => {
   // Run initial parallel cleanup on boot
   cleanupPastEvents(null, 0).catch(err => console.error('Initial cleanup error:', err));
 
-  // Cron 1: Poll inboxes every 2 minutes
+  // Cron 1: Poll inboxes every 2 minutes & automatically cleanup expired events
   cron.schedule('*/2 * * * *', async () => {
-    console.log('Cron triggered: Polling all active accounts');
+    console.log('Cron triggered: Polling all active accounts and auto-cleaning past events');
     try {
+      await cleanupPastEvents(null, 0);
       const accounts = await GmailAccount.find({ isActive: true });
       for (const account of accounts) {
         await pollAccount(account, false);
