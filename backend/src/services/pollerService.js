@@ -118,16 +118,18 @@ export const evaluatePreAiFilter = (emailContent = {}) => {
     return { shouldSkip: false, reason: 'Strong event markers detected' };
   }
 
-  // 2. High-Confidence Non-Event Subject Patterns (OTPs, Security, Orders, Bills)
+  // 2. High-Confidence Non-Event Subject Patterns (OTPs, Security, Orders, Bills, Job Alerts, Digest)
   const nonEventSubjectPatterns = [
-    /\b(otp|one time password|verification code|security code)\b/i,
-    /\b(password reset|reset your password|verify your email|email verification)\b/i,
-    /\b(new sign-in|security alert|login attempt|account access)\b/i,
-    /\b(order confirmed|order placed|order shipped|out for delivery|delivered)\b/i,
-    /\b(payment received|payment receipt|invoice for|statement of account|billing receipt)\b/i,
-    /\b(your subscription|subscription renewed|recharge successful)\b/i,
-    /\b(\d+%\s*off|sale is live|exclusive offer|mega sale|discount inside|flash sale)\b/i,
-    /\b(liked your|started following|endorsed you for|weekly digest|daily digest)\b/i
+    /\b(otp|one time password|verification code|security code|security alert)\b/i,
+    /\b(password reset|reset your password|verify your email|email verification|two-factor)\b/i,
+    /\b(new sign-in|login attempt|account access|device authorized|device sign-in)\b/i,
+    /\b(order confirmed|order placed|order shipped|out for delivery|delivered|tracking details)\b/i,
+    /\b(payment received|payment receipt|invoice for|statement of account|billing receipt|debited by|credited with)\b/i,
+    /\b(your subscription|subscription renewed|recharge successful|plan expiring|plan is ending|billing update)\b/i,
+    /\b(\d+%\s*off|sale is live|exclusive offer|mega sale|discount inside|flash sale|limited deal|cashback)\b/i,
+    /\b(liked your|started following|endorsed you for|weekly digest|daily digest|trending in your network)\b/i,
+    /\b(jobs for you|job alert|recommended jobs|new openings|career digest|top picks for you)\b/i,
+    /\b(credit card bill|credit score update|statement ready|bank statement|account balance)\b/i
   ];
 
   for (const pattern of nonEventSubjectPatterns) {
@@ -136,14 +138,26 @@ export const evaluatePreAiFilter = (emailContent = {}) => {
     }
   }
 
-  // 3. Known Automated/Transactional/Social Senders without event content
+  // 3. Known Automated/Transactional/Social/Promotional Senders without event content
   const promotionalSenders = [
-    'marketing@', 'promotions@', 'newsletter@', 'newsletters@', 'digest@',
-    'no-reply@accounts.google.com', 'account-security-noreply@',
-    'orders@', 'shipping@', 'delivery@', 'billing@', 'payments@',
-    'swiggy.in', 'zomato.com', 'uber.com', 'ola.com', 'amazon.in', 'amazon.com',
-    'flipkart.com', 'myntra.com', 'netflix.com', 'spotify.com',
-    'mail.instagram.com', 'instagram.com', 'linkedin.com', 'facebookmail.com', 'x.com', 'twitter.com'
+    // Marketing & generic auto-mailers
+    'marketing@', 'promotions@', 'newsletter@', 'newsletters@', 'digest@', 'updates@', 'mailer@',
+    'no-reply@accounts.google.com', 'account-security-noreply@', 'donotreply@', 'support@',
+    'orders@', 'shipping@', 'delivery@', 'billing@', 'payments@', 'invoices@',
+    // Food & Travel
+    'swiggy.in', 'zomato.com', 'uber.com', 'ola.com', 'makemytrip.com', 'irctc.co.in', 'goibibo.com',
+    // E-Commerce
+    'amazon.in', 'amazon.com', 'flipkart.com', 'myntra.com', 'ajio.com', 'meesho.com', 'tatacliq.com',
+    // Streaming & Entertainment
+    'netflix.com', 'spotify.com', 'primevideo.com', 'hotstar.com', 'bookmyshow.com',
+    // Social & Career Networks
+    'mail.instagram.com', 'instagram.com', 'linkedin.com', 'facebookmail.com', 'x.com', 'twitter.com',
+    'naukri.com', 'internshala.com', 'unstop.com', 'foundit.in', 'glassdoor.com',
+    // Developer, Blogging & Learning Platforms (Non-event newsletters)
+    'medium.com', 'coderpad.io', 'leetcode.com', 'hackerrank.com', 'geeksforgeeks.org',
+    'coursera.org', 'udemy.com', 'edx.org', 'udacity.com', 'duolingo.com',
+    // Banking & Financial
+    'hdfcbank.net', 'icicibank.com', 'sbi.co.in', 'axisbank.com', 'cred.club', 'groww.in', 'zerodha.com'
   ];
 
   const isPromoSender = promotionalSenders.some(s => from.includes(s));
