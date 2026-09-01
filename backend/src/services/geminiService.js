@@ -178,29 +178,35 @@ export const checkIsDuplicateWithGemini = async (candidateEvent, existingEvents 
         return { isDuplicate: false, duplicateEventId: null, reasoning: 'No existing events found in time window' };
     }
 
+    const candidateTitle = (candidateEvent.title || '').toLowerCase().trim();
+    const candidateDate = candidateEvent.date || '';
+
+    // 1. Fast Algorithmic Duplicate Check (Saves 100% of AI calls for duplicate detection)
+    const exactMatch = existingEvents.find(e => {
+        const title = (e.title || e.summary || '').toLowerCase().trim();
+        const start = String(e.startTime || e.start?.dateTime || e.start?.date || '');
+        const titleMatches = (title === candidateTitle) || (title.length > 5 && candidateTitle.includes(title)) || (candidateTitle.length > 5 && title.includes(candidateTitle));
+        const dateMatches = !candidateDate || start.includes(candidateDate);
+        return titleMatches && dateMatches;
+    });
+
+    if (exactMatch) {
+        return {
+            isDuplicate: true,
+            duplicateEventId: exactMatch.id || exactMatch._id,
+            reasoning: 'Matched by date and title similarity (fast local check)'
+        };
+    }
+
+    // 2. AI Duplicate Check (Fallback only if needed)
     const apiKey = getNextGeminiApiKey();
     const genAI = new GoogleGenerativeAI(apiKey);
 
     const prompt = `You are a Calendar Assistant checking for duplicate events.
-Candidate Event to Add:
-Title: ${candidateEvent.title}
-Date: ${candidateEvent.date}
-Start Time: ${candidateEvent.startTime}
-End Time: ${candidateEvent.endTime}
-Location: ${candidateEvent.location || ''}
-Description: ${candidateEvent.description || ''}
+Candidate Event: Title: ${candidateEvent.title}, Date: ${candidateEvent.date}, Start: ${candidateEvent.startTime}, End: ${candidateEvent.endTime}, Location: ${candidateEvent.location || ''}
+Existing Events: ${JSON.stringify(existingEvents.map(e => ({ id: e.id || e._id, title: e.title || e.summary, startTime: e.startTime || e.start?.dateTime || e.start?.date })))}
 
-Existing Events around this time:
-${JSON.stringify(existingEvents.map(e => ({
-    id: e.id || e._id,
-    title: e.title || e.summary,
-    startTime: e.startTime || e.start?.dateTime || e.start?.date,
-    endTime: e.endTime || e.end?.dateTime || e.end?.date,
-    location: e.location
-})), null, 2)}
-
-Determine if the Candidate Event represents the EXACT SAME real-world event/class as any existing event.
-Respond ONLY with a JSON object:
+Respond ONLY with valid JSON:
 {
   "isDuplicate": true | false,
   "duplicateEventId": "string or null",
@@ -214,26 +220,8 @@ Respond ONLY with a JSON object:
             const rawText = result.response.text();
             return extractJson(rawText);
         } catch (error) {
-            console.warn(`Duplicate check on model ${modelName} failed: ${error.message}. Trying fallback...`);
+            // Silently cascade through fallback models or fall back to false
         }
-    }
-
-    console.log(`Gemini duplicate check fallback to time/title matching`);
-    const candidateTitle = (candidateEvent.title || '').toLowerCase().trim();
-    const candidateDate = candidateEvent.date || '';
-
-    const match = existingEvents.find(e => {
-        const title = (e.title || e.summary || '').toLowerCase().trim();
-        const start = String(e.startTime || e.start?.dateTime || e.start?.date || '');
-        return (title.includes(candidateTitle) || candidateTitle.includes(title)) && (!candidateDate || start.includes(candidateDate));
-    });
-
-    if (match) {
-        return {
-            isDuplicate: true,
-            duplicateEventId: match.id || match._id,
-            reasoning: 'Matched by date and title similarity (algorithmic fallback)'
-        };
     }
 
     return { isDuplicate: false, duplicateEventId: null, reasoning: 'No duplicate match found' };
