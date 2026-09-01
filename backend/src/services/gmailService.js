@@ -172,6 +172,7 @@ export const getInboxMessages = async (account, maxResults = 30) => {
         const listRes = await gmail.users.messages.list({
             userId: 'me',
             maxResults,
+            q: 'category:primary'
         });
         return listRes.data.messages || [];
     } catch (error) {
@@ -196,6 +197,7 @@ export const parseEmailContent = (message) => {
     const parsed = {
         messageId: message.id,
         threadId: message.threadId,
+        labelIds: message.labelIds || [],
         subject: getHeader('Subject'),
         from: getHeader('From'),
         to: getHeader('To'),

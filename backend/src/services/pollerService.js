@@ -93,10 +93,22 @@ export const parseEventDates = (eventData = {}, timeZone = 'Asia/Kolkata') => {
  * @param {Object} emailContent - { subject, from, body }
  * @returns {{ shouldSkip: boolean, reason: string }}
  */
-export const evaluatePreAiFilter = (emailContent = {}) => {
-  const subject = (emailContent.subject || '').toLowerCase().trim();
-  const from = (emailContent.from || '').toLowerCase().trim();
-  const body = (emailContent.body || '').toLowerCase().trim();
+export const evaluatePreAiFilter = (parsedEmail = {}) => {
+  const subject = (parsedEmail?.subject || '').toLowerCase();
+  const from = (parsedEmail?.from || '').toLowerCase();
+  const body = (parsedEmail?.body || '').toLowerCase();
+  const labels = parsedEmail?.labelIds || [];
+
+  // 0. Gmail Category Tab Filter: Skip emails categorized into Promotions, Social, or Forums
+  if (labels.includes('CATEGORY_PROMOTIONS')) {
+    return { shouldSkip: true, reason: 'Email is in Gmail Promotions category tab' };
+  }
+  if (labels.includes('CATEGORY_SOCIAL')) {
+    return { shouldSkip: true, reason: 'Email is in Gmail Social category tab' };
+  }
+  if (labels.includes('CATEGORY_FORUMS')) {
+    return { shouldSkip: true, reason: 'Email is in Gmail Forums category tab' };
+  }
 
   // 1. Positive Signal Override: If strong meeting/event markers exist, NEVER skip!
   const hasStrongEventMarkers = 
