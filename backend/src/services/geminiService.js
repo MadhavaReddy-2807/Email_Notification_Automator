@@ -9,7 +9,7 @@ import { config } from '../config/index.js';
 const callGemini = async (prompt, retries = 2, delayMs = 2500) => {
     try {
         const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
         
         const fullPrompt = `You are an AI assistant specialized in parsing emails to extract calendar events.
 Respond ONLY with a valid JSON object matching this schema. Do not add markdown code blocks or commentary:
@@ -118,7 +118,7 @@ export const checkIsDuplicateWithGemini = async (candidateEvent, existingEvents)
 
     try {
         const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
 
         const prompt = `You are a Calendar Assistant checking for duplicate events.
 Candidate Event to Add:
