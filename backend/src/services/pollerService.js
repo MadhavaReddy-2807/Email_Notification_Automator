@@ -295,6 +295,20 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           const matchesFilter = user.settings.filterSenders.some(f => sender.includes(f.toLowerCase().trim()));
           if (!matchesFilter) {
             console.log(`Sender "${sender}" not in filter whitelist for ${user.email}, skipping.`);
+            await ProcessedThread.findOneAndUpdate(
+              { accountId: account._id, gmailThreadId: threadId },
+              {
+                $set: {
+                  userId: user._id,
+                  lastMessageId: msg.id,
+                  lastProcessedAt: new Date(),
+                  status: 'no_event',
+                  threadSnippet: parsedSubject || 'Sender Filtered'
+                },
+                $setOnInsert: { firstProcessedAt: new Date(), messageCount: 1 }
+              },
+              { upsert: true, new: true }
+            );
             continue;
           }
         }
