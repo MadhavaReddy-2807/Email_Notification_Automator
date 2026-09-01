@@ -208,23 +208,12 @@ export const createEvent = async (user, eventData) => {
         fullDescription += `\n\n👤 Organizer: ${eventData.organizer}`;
     }
 
-    const userEmail = user.email || (user.accounts && user.accounts[0]?.email);
-
     const event = {
         summary: eventData.title,
         location: finalLocation,
         description: fullDescription.trim(),
         start,
         end,
-        ...(userEmail ? {
-            attendees: [
-                {
-                    email: userEmail,
-                    displayName: user.name || 'Attendee',
-                    responseStatus: 'needsAction' // Prompts the user with Accept / Decline in Google Calendar
-                }
-            ]
-        } : {}),
         reminders: {
             useDefault: false,
             overrides: [
@@ -243,7 +232,6 @@ export const createEvent = async (user, eventData) => {
             const response = await calendar.events.insert({
                 calendarId: 'primary',
                 resource: event,
-                sendUpdates: 'all' // Instructs Google Calendar to immediately send the invitation / scheduling notification email
             });
             const created = response.data;
             const result = {
@@ -347,7 +335,6 @@ export const updateEvent = async (user, calendarEventId, eventData) => {
             calendarId: 'primary',
             eventId: calendarEventId,
             resource: event,
-            sendUpdates: 'all'
         });
         const updated = response.data;
         return {
@@ -406,7 +393,6 @@ export const deleteEvent = async (user, calendarEventId) => {
         await calendar.events.delete({
             calendarId: 'primary',
             eventId: calendarEventId,
-            sendUpdates: 'all'
         });
     } catch (error) {
         console.error(`Error deleting calendar event ${calendarEventId}:`, error);
