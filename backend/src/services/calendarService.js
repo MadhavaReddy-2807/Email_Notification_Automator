@@ -93,10 +93,16 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
         return { dateTime: localIso, timeZone: targetZone };
     }
 
+    const getOffset = (tz) => {
+        if (!tz || tz === 'Asia/Kolkata' || tz === 'IST') return '+05:30';
+        return '';
+    };
+    const offsetStr = getOffset(targetZone);
+
     if (typeof timeOrDate === 'string') {
         const trimmed = timeOrDate.trim();
 
-        // 12-hour or 24-hour match (e.g., "12:30", "12:30 PM", "12:30pm", "17:45", "5:45 PM", "09:00")
+        // 12-hour or 24-hour match (e.g., "16:30", "12:30", "12:30 PM", "12:30pm", "17:45", "4:30 PM", "09:00")
         const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
         if (match) {
             let hours = parseInt(match[1], 10);
@@ -107,39 +113,16 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
             if (ampm === 'am' && hours === 12) hours = 0;
 
             const timeFormatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-            const localIso = `${baseDate}T${timeFormatted}`;
+            const localIso = `${baseDate}T${timeFormatted}${offsetStr}`;
             return { dateTime: localIso, timeZone: targetZone };
         }
 
         if (trimmed.includes('T')) {
-            const parsed = new Date(trimmed);
-            if (!isNaN(parsed.getTime())) {
-                const formatter = new Intl.DateTimeFormat('en-CA', {
-                    timeZone: targetZone,
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: false
-                });
-                const parts = formatter.formatToParts(parsed);
-                const getPart = (type) => parts.find(p => p.type === type)?.value || '00';
-                const y = getPart('year');
-                const m = getPart('month');
-                const d = getPart('day');
-                let h = getPart('hour');
-                if (h === '24') h = '00';
-                const min = getPart('minute');
-                const s = getPart('second');
-                return { dateTime: `${y}-${m}-${d}T${h}:${min}:${s}`, timeZone: targetZone };
-            }
-            const cleanIso = trimmed.replace(/Z$/i, '');
-            return { dateTime: cleanIso, timeZone: targetZone };
+            const cleanIso = trimmed.replace(/Z$/i, '').replace(/[+-]\d{2}:\d{2}$/, '');
+            return { dateTime: `${cleanIso}${offsetStr}`, timeZone: targetZone };
         }
 
-        const localIso = `${baseDate}T${trimmed.padStart(5, '0')}:00`;
+        const localIso = `${baseDate}T${trimmed.padStart(5, '0')}:00${offsetStr}`;
         return { dateTime: localIso, timeZone: targetZone };
     }
 
