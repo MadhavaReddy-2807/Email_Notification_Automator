@@ -87,6 +87,8 @@ const Dashboard = () => {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to sync event');
     }
+  };
+
   const [scanning, setScanning] = useState(false);
 
   const handleScanInboxes = async () => {

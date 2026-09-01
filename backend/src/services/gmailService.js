@@ -147,6 +147,8 @@ export const getThread = async (gmailClient, threadId) => {
         console.error(`Error fetching thread ${threadId}:`, error);
         throw error;
     }
+};
+
 export const getInboxMessages = async (account, maxResults = 25) => {
     const gmail = getGmailClient(account);
     try {
