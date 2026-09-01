@@ -14,7 +14,7 @@ const FALLBACK_MODELS = [
 
 /**
  * Helper to reliably extract and parse JSON from LLM output
- * Handles markdown formatting, commentary, bullet points (*), or preamble
+ * Handles markdown formatting, commentary, bullet points (*), trailing notes, or preamble
  */
 const extractJson = (rawText) => {
   if (!rawText || typeof rawText !== 'string') {
@@ -24,26 +24,73 @@ const extractJson = (rawText) => {
   // 1. Strip markdown fences and clean whitespace
   let text = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
+  // Helper to sanitize common LLM syntax flaws
+  const sanitize = (str) =>
+    str
+      .replace(/\.\.\./g, '') // strip ellipses
+      .replace(/,\s*([\}\]])/g, '$1') // strip trailing commas
+      .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '') // strip comments
+      .trim();
+
+  // 2. Direct parse attempt
   try {
     return JSON.parse(text);
-  } catch (e1) {
-    // 2. Search for the outermost JSON object {...}
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      let jsonCandidate = match[0].trim();
-      try {
-        return JSON.parse(jsonCandidate);
-      } catch (e2) {
-        // 3. Clean up ellipses (...), trailing commas, unquoted keys, or malformed newlines
-        const cleanedCandidate = jsonCandidate
-          .replace(/\.\.\./g, '') // remove LLM ellipses
-          .replace(/,\s*([\}\]])/g, '$1') // remove trailing commas
-          .replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '') // strip comments
-          .trim();
-        return JSON.parse(cleanedCandidate);
+  } catch (e) {
+    // 3. Locate the first '{' and use balanced-bracket counting to extract the exact root object
+    const startIdx = text.indexOf('{');
+    if (startIdx !== -1) {
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let endIdx = -1;
+
+      for (let i = startIdx; i < text.length; i++) {
+        const char = text[i];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (char === '\\') {
+          escape = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (!inString) {
+          if (char === '{') depth++;
+          else if (char === '}') {
+            depth--;
+            if (depth === 0) {
+              endIdx = i;
+              break;
+            }
+          }
+        }
+      }
+
+      if (endIdx !== -1) {
+        const candidate = text.substring(startIdx, endIdx + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch (err1) {
+          try {
+            return JSON.parse(sanitize(candidate));
+          } catch (err2) {
+            // fallback
+          }
+        }
       }
     }
-    throw e1;
+
+    // 4. Regex outermost fallback
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(sanitize(match[0]));
+    }
+
+    throw e;
   }
 };
 const callGemini = async (prompt) => {
