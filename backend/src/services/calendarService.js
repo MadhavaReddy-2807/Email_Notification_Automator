@@ -34,7 +34,7 @@ export const getCalendarClient = async (user) => {
  * @returns {Promise<string>} Timezone string e.g. 'Asia/Kolkata'
  */
 export const getUserTimeZone = async (calendar, user = null) => {
-    if (user?.settings?.timeZone) {
+    if (user?.settings?.timeZone && user.settings.timeZone !== 'UTC') {
         return user.settings.timeZone;
     }
     try {
@@ -46,7 +46,7 @@ export const getUserTimeZone = async (calendar, user = null) => {
         if (settingRes.data?.value && settingRes.data.value !== 'UTC') {
             return settingRes.data.value;
         }
-        return res.data?.timeZone || 'Asia/Kolkata';
+        return 'Asia/Kolkata';
     } catch (err) {
         return 'Asia/Kolkata';
     }
@@ -61,15 +61,15 @@ export const getUserTimeZone = async (calendar, user = null) => {
  * @returns {Object} Start/end object for Google Calendar
  */
 export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') => {
-    const targetZone = timeZone || 'Asia/Kolkata';
+    const targetZone = (timeZone && timeZone !== 'UTC') ? timeZone : 'Asia/Kolkata';
     let baseDate = dateStr;
     if (!baseDate || !/^\d{4}-\d{2}-\d{2}$/.test(baseDate)) {
         baseDate = new Date().toISOString().split('T')[0];
     }
 
     const getOffset = (tz) => {
-        if (!tz || tz === 'Asia/Kolkata' || tz === 'IST') return '+05:30';
-        return '';
+        if (!tz || tz === 'Asia/Kolkata' || tz === 'IST' || tz === 'UTC') return '+05:30';
+        return '+05:30';
     };
     const offsetStr = getOffset(targetZone);
 
@@ -208,6 +208,13 @@ export const createEvent = async (user, eventData) => {
         fullDescription += `\n\n👤 Organizer: ${eventData.organizer}`;
     }
 
+    console.log(`\n🗓️ [Google Calendar Insert Payload]`);
+    console.log(`   Summary:  "${eventData.title}"`);
+    console.log(`   Timezone: "${timeZone}"`);
+    console.log(`   Start:    ${JSON.stringify(start)}`);
+    console.log(`   End:      ${JSON.stringify(end)}`);
+    console.log(`-----------------------------------------------\n`);
+
     const event = {
         summary: eventData.title,
         location: finalLocation,
@@ -223,23 +230,35 @@ export const createEvent = async (user, eventData) => {
         }
     };
 
-    try {
-        const response = await calendar.events.insert({
-            calendarId: 'primary',
-            resource: event,
-        });
-        const created = response.data;
-        const result = {
-            id: created.id,
-            startDateTime: created.start?.dateTime ? new Date(created.start.dateTime) : null,
-            endDateTime: created.end?.dateTime ? new Date(created.end.dateTime) : null,
-            timeZone: created.start?.timeZone || timeZone,
-            toString: () => created.id
-        };
-        return result;
-    } catch (error) {
-        console.error('Error creating calendar event:', error);
-        throw error;
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+        try {
+            attempts++;
+            const response = await calendar.events.insert({
+                calendarId: 'primary',
+                resource: event,
+            });
+            const created = response.data;
+            const result = {
+                id: created.id,
+                startDateTime: created.start?.dateTime ? new Date(created.start.dateTime) : null,
+                endDateTime: created.end?.dateTime ? new Date(created.end.dateTime) : null,
+                timeZone: created.start?.timeZone || timeZone,
+                toString: () => created.id
+            };
+            return result;
+        } catch (error) {
+            const isNetworkError = error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.message?.includes('ECONNRESET');
+            if (isNetworkError && attempts < maxAttempts) {
+                console.warn(`[CalendarService] Transient network reset (${error.code || 'ECONNRESET'}) on attempt ${attempts}. Retrying in ${attempts * 1.5}s...`);
+                await new Promise(r => setTimeout(r, attempts * 1500));
+                continue;
+            }
+            console.error('Error creating calendar event:', error.message || error);
+            throw error;
+        }
     }
 };
 

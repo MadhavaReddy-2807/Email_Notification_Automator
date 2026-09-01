@@ -380,6 +380,18 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           : (aiResponse.event ? [aiResponse.event] : []);
 
         console.log(`[Poller] AI Action: ${aiResponse.action} (Confidence: ${aiResponse.confidence}), Extracted Events: ${eventsToProcess.length}`);
+        if (eventsToProcess.length > 0) {
+          console.log(`\n📅 ================== EXTRACTED EVENT TIMELINE ==================`);
+          eventsToProcess.forEach((evt, idx) => {
+            console.log(`   [Event #${idx + 1}] Title: "${evt.title}"`);
+            console.log(`   ├─ Raw Date Extracted: "${evt.date}"`);
+            console.log(`   ├─ Raw Start Time:     "${evt.startTime}"`);
+            console.log(`   ├─ Raw End Time:       "${evt.endTime || 'auto (+1h)'}"`);
+            console.log(`   ├─ Location:           "${evt.location || 'N/A'}"`);
+            console.log(`   └─ Meeting Link:       "${evt.meetingLink || 'N/A'}"`);
+          });
+          console.log(`=================================================================\n`);
+        }
 
         if (aiResponse.confidence < 0.4) {
           console.log(`[Poller] Low confidence (${aiResponse.confidence}) for "${parsedSubject}", skipping.`);
@@ -529,14 +541,12 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
           if (existingEvent) {
             if (existingEvent.calendarEventId) {
-              const calendarResult = await updateEvent(user, existingEvent.calendarEventId, {
+              await updateEvent(user, existingEvent.calendarEventId, {
                 ...eventItem,
                 date: eventItem.date,
                 startTime: eventItem.startTime,
                 endTime: eventItem.endTime
               });
-              if (calendarResult?.startDateTime) eventStart = calendarResult.startDateTime;
-              if (calendarResult?.endDateTime) eventEnd = calendarResult.endDateTime;
             }
 
             existingEvent.history.push({
