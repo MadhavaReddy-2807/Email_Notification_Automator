@@ -150,6 +150,21 @@ export const createEvent = async (user, eventData) => {
         delete start.date;
     }
 
+    // Do not create past / already-completed events in Google Calendar
+    if (end.dateTime) {
+        const eventEndDate = new Date(end.dateTime);
+        if (!isNaN(eventEndDate.getTime()) && eventEndDate < new Date()) {
+            console.log(`[CalendarService] Skipping Google Calendar creation for past event "${eventData.title}" (ended at ${eventEndDate.toLocaleString()})`);
+            return null;
+        }
+    } else if (end.date) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (end.date < todayStr) {
+            console.log(`[CalendarService] Skipping Google Calendar creation for past all-day event "${eventData.title}" (date: ${end.date})`);
+            return null;
+        }
+    }
+
     let finalLocation = eventData.location || '';
     if (eventData.meetingLink) {
         if (finalLocation && !finalLocation.includes(eventData.meetingLink)) {

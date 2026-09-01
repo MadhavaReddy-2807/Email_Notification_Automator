@@ -109,6 +109,10 @@ export const addToCalendar = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Event already added to calendar' });
     }
 
+    if (new Date(event.endTime) < new Date()) {
+      return res.status(400).json({ success: false, error: 'Cannot sync already-completed past event to Google Calendar' });
+    }
+
     const calendarEventId = await calendarService.createEvent(req.user, {
       title: event.title,
       description: event.description,

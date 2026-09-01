@@ -191,6 +191,13 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           for (const eventItem of eventsToProcess) {
             const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem);
 
+            // Guard: Skip events that have already ended/completed in the past
+            const now = new Date();
+            if (fallbackEnd < now) {
+              console.log(`[Poller] Skipping already-completed past event "${eventItem.title}" on ${eventItem.date || checkDate || 'past date'} (ended at ${fallbackEnd.toLocaleTimeString()}).`);
+              continue;
+            }
+
             // Duplicate Check before adding to Google Calendar
             const checkDate = eventItem.date || fallbackStart.toISOString().split('T')[0];
             const startWindow = new Date(`${checkDate}T00:00:00.000Z`);
