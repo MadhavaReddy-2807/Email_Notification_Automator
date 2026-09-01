@@ -190,12 +190,7 @@ const Events = () => {
                   events.map((evt) => (
                     <tr key={evt._id}>
                       <td>
-                        <strong>{evt.title}</strong>
-                        {evt.description && (
-                          <div className="text-muted text-truncate" style={{ maxWidth: '280px' }}>
-                            {evt.description}
-                          </div>
-                        )}
+                        <strong style={{ fontSize: '15px' }}>{evt.title}</strong>
                       </td>
                       <td>
                         <div className="date-time-cell">
