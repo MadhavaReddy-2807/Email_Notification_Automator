@@ -54,24 +54,32 @@ Comprehensive Extraction Guidelines:
 ${prompt}`;
 
     for (const modelName of FALLBACK_MODELS) {
-        try {
-            const model = genAI.getGenerativeModel({ model: modelName });
-            const result = await model.generateContent(fullPrompt);
-            const rawText = result.response.text();
-            const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleaned);
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.generateContent(fullPrompt);
+                const rawText = result.response.text();
+                const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const parsed = JSON.parse(cleaned);
 
-            // Normalize single "event" into "events" array if needed
-            if (parsed.event && (!parsed.events || parsed.events.length === 0)) {
-                parsed.events = [parsed.event];
-            }
-            if (!parsed.events) {
-                parsed.events = [];
-            }
+                // Normalize single "event" into "events" array if needed
+                if (parsed.event && (!parsed.events || parsed.events.length === 0)) {
+                    parsed.events = [parsed.event];
+                }
+                if (!parsed.events) {
+                    parsed.events = [];
+                }
 
-            return parsed;
-        } catch (error) {
-            console.warn(`Model ${modelName} encountered error/rate limit: ${error.message?.substring(0, 100)}. Trying fallback model...`);
+                return parsed;
+            } catch (error) {
+                if (error.message?.includes('429') || error.status === 429) {
+                    console.warn(`Model ${modelName} hit rate limit on attempt ${attempt + 1}. Waiting 3s...`);
+                    await new Promise(r => setTimeout(r, 3000));
+                } else {
+                    console.warn(`Model ${modelName} error: ${error.message?.substring(0, 100)}`);
+                    break;
+                }
+            }
         }
     }
 

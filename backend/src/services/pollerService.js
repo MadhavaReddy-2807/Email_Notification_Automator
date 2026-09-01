@@ -233,6 +233,10 @@ export const pollAccount = async (account, fullInboxScan = false) => {
               }
             }
 
+            let calendarEventId = null;
+            let eventStart = fallbackStart;
+            let eventEnd = fallbackEnd;
+
             // Auto-add to Google Calendar
             if (user.settings?.autoAdd !== false) {
               const calendarResult = await createEvent(user, {
