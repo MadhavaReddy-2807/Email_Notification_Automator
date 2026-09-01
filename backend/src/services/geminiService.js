@@ -12,10 +12,27 @@ const FALLBACK_MODELS = [
 ];
 
 /**
- * Helper to call Gemini and parse JSON with automatic model failover
- * @param {string} prompt 
- * @returns {Promise<Object>}
+ * Helper to reliably extract and parse JSON from LLM output
+ * Handles markdown formatting, commentary, bullet points (*), or preamble
  */
+const extractJson = (rawText) => {
+  if (!rawText || typeof rawText !== 'string') {
+    throw new Error('Empty AI response');
+  }
+
+  // 1. Try stripping markdown fences first
+  const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // 2. Search for the outermost JSON object {...}
+    const match = rawText.match(/\{[\s\S]*\}/);
+    if (match) {
+      return JSON.parse(match[0]);
+    }
+    throw e;
+  }
+};
 const callGemini = async (prompt) => {
     const genAI = new GoogleGenerativeAI(config.gemini.apiKey || process.env.GEMINI_API_KEY);
     const fullPrompt = `You are an AI assistant specialized in deeply parsing emails to extract rich, comprehensive calendar events.
@@ -67,8 +84,7 @@ ${prompt}`;
                 const model = genAI.getGenerativeModel({ model: modelName });
                 const result = await model.generateContent(fullPrompt);
                 const rawText = result.response.text();
-                const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-                const parsed = JSON.parse(cleaned);
+                const parsed = extractJson(rawText);
 
                 // Normalize single "event" into "events" array if needed
                 if (parsed.event && (!parsed.events || parsed.events.length === 0)) {
@@ -187,8 +203,7 @@ Respond ONLY with a JSON object:
             const model = genAI.getGenerativeModel({ model: modelName });
             const result = await model.generateContent(prompt);
             const rawText = result.response.text();
-            const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
-            return JSON.parse(cleaned);
+            return extractJson(rawText);
         } catch (error) {
             console.warn(`Duplicate check on model ${modelName} failed: ${error.message}. Trying fallback...`);
         }
