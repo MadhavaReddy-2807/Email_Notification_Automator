@@ -67,6 +67,12 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
         baseDate = new Date().toISOString().split('T')[0];
     }
 
+    const getOffset = (tz) => {
+        if (!tz || tz === 'Asia/Kolkata' || tz === 'IST') return '+05:30';
+        return '';
+    };
+    const offsetStr = getOffset(targetZone);
+
     if (timeOrDate instanceof Date) {
         // Accurately extract local time in targetZone regardless of server timezone
         const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -92,12 +98,6 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
         const localIso = `${y}-${m}-${d}T${h}:${min}:${s}${offsetStr}`;
         return { dateTime: localIso, timeZone: targetZone };
     }
-
-    const getOffset = (tz) => {
-        if (!tz || tz === 'Asia/Kolkata' || tz === 'IST') return '+05:30';
-        return '';
-    };
-    const offsetStr = getOffset(targetZone);
 
     if (typeof timeOrDate === 'string') {
         const trimmed = timeOrDate.trim();
