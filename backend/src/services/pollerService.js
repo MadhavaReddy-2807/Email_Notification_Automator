@@ -199,7 +199,10 @@ export const pollAccount = async (account, fullInboxScan = false) => {
         for (const inboxMsg of recentInbox) {
           const exists = await ProcessedThread.findOne({
             accountId: account._id,
-            lastMessageId: inboxMsg.id
+            $or: [
+              { lastMessageId: inboxMsg.id },
+              { gmailThreadId: inboxMsg.threadId }
+            ]
           });
           if (!exists) {
             messages.push(inboxMsg);
@@ -305,6 +308,22 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
         if (aiResponse.confidence < 0.4) {
           console.log(`[Poller] Low confidence (${aiResponse.confidence}) for "${parsedSubject}", skipping.`);
+          if (!processedThread) {
+            const newThreadRecord = new ProcessedThread({
+              userId: user._id,
+              accountId: account._id,
+              gmailThreadId: threadId,
+              lastMessageId: msg.id,
+              messageCount: 1,
+              status: 'no_event',
+              threadSnippet: parsedSubject || 'Low Confidence'
+            });
+            await newThreadRecord.save();
+          } else {
+            processedThread.lastMessageId = msg.id;
+            processedThread.lastProcessedAt = new Date();
+            await processedThread.save();
+          }
           continue;
         }
 
