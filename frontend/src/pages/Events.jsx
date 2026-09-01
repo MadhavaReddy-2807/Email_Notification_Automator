@@ -62,6 +62,22 @@ const Events = () => {
     }
   };
 
+  const handleCleanupPast = async () => {
+    try {
+      setCleaning(true);
+      toast.loading('Cleaning up past ended events from database...', { id: 'cleanToast' });
+      const res = await eventsApi.cleanupPast(0);
+      if (res.data?.success) {
+        toast.success(res.data.message || 'Cleaned up past events!', { id: 'cleanToast' });
+        fetchEvents(1, statusFilter);
+      }
+    } catch (err) {
+      toast.error('Failed to clean up past events', { id: 'cleanToast' });
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   useEffect(() => {
     fetchEvents(1, statusFilter);
   }, [statusFilter]);
@@ -78,12 +94,29 @@ const Events = () => {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to cancel this event?')) return;
+  const handleUpdateEvent = async (e) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+    try {
+      const res = await eventsApi.update(editingEvent._id, editForm);
+      if (res.data?.success) {
+        toast.success('Event updated successfully');
+        setEditingEvent(null);
+        fetchEvents(pagination.page);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to update event');
+    }
+  };
+
+  const handleDeleteEvent = async (id) => {
+    if (!window.confirm('Are you sure you want to cancel this event? This will also remove it from Google Calendar.')) {
+      return;
+    }
     try {
       const res = await eventsApi.delete(id);
       if (res.data?.success) {
-        toast.success('Event cancelled');
+        toast.success('Event cancelled successfully');
         fetchEvents(pagination.page);
       }
     } catch (err) {
@@ -102,26 +135,12 @@ const Events = () => {
     });
   };
 
-  const handleUpdate = async (e) => {
-    e.preventDefault();
-    try {
-      const res = await eventsApi.update(editingEvent._id, editForm);
-      if (res.data?.success) {
-        toast.success('Event updated successfully');
-        setEditingEvent(null);
-        fetchEvents(pagination.page);
-      }
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update event');
-    }
-  };
-
   return (
     <Layout title="Calendar Events">
       <div className="page-content">
         <div className="page-header-row">
           <div>
-            <h2>Google Calendar Synchronized Events</h2>
+            <h2>Scheduled Calendar Events</h2>
             <p>Events discovered and scheduled by AI automation across your inboxes.</p>
           </div>
 
@@ -129,10 +148,20 @@ const Events = () => {
             <button 
               className="btn btn-primary btn-icon-text"
               onClick={handleScanInboxes}
-              disabled={scanning || loading}
+              disabled={scanning || loading || cleaning}
             >
               <FiRefreshCw className={scanning ? 'spin' : ''} />
               <span>{scanning ? 'Scanning...' : 'Scan Inboxes'}</span>
+            </button>
+
+            <button 
+              className="btn btn-secondary btn-icon-text"
+              onClick={handleCleanupPast}
+              disabled={cleaning || loading || scanning}
+              title="Remove expired/past meetings from database"
+            >
+              <FiTrash2 className={cleaning ? 'spin' : ''} />
+              <span>{cleaning ? 'Cleaning...' : 'Prune Past Events'}</span>
             </button>
 
             <select
@@ -149,7 +178,7 @@ const Events = () => {
             <button 
               className="btn btn-secondary btn-icon-text"
               onClick={() => fetchEvents(pagination.page)}
-              disabled={loading || scanning}
+              disabled={loading || scanning || cleaning}
             >
               <FiRefreshCw className={loading ? 'spin' : ''} />
               <span>Refresh</span>

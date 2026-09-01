@@ -408,10 +408,55 @@ export const scanUserInboxes = async (userId) => {
 };
 
 /**
- * Starts the cron job to poll all active accounts every 2 minutes
+ * Automatically prunes past/expired meetings from the database.
+ * Runs in parallel to keep MongoDB lean, fast, and free of old clutter.
+ * @param {string|null} userId - Specific user or null for global cleanup
+ * @param {number} daysOld - Events ended before this many days (default: 0 = already ended)
+ */
+export const cleanupPastEvents = async (userId = null, daysOld = 0) => {
+  try {
+    const thresholdDate = new Date();
+    if (daysOld > 0) {
+      thresholdDate.setDate(thresholdDate.getDate() - daysOld);
+    }
+
+    const query = { endTime: { $lt: thresholdDate } };
+    if (userId) query.userId = userId;
+
+    const pastEvents = await Event.find(query).select('_id');
+    if (pastEvents.length === 0) {
+      return { deletedCount: 0 };
+    }
+
+    const eventIds = pastEvents.map(e => e._id);
+    const result = await Event.deleteMany({ _id: { $in: eventIds } });
+
+    // Unlink deleted events from processed threads
+    await ProcessedThread.updateMany(
+      { linkedEvent: { $in: eventIds } },
+      { $unset: { linkedEvent: 1 } }
+    );
+
+    console.log(`[Cleanup Job] Pruned ${result.deletedCount} past event(s) ended before ${thresholdDate.toLocaleTimeString()}`);
+    return { deletedCount: result.deletedCount };
+  } catch (error) {
+    console.error('[Cleanup Job] Error pruning past events:', error);
+    return { deletedCount: 0, error: error.message };
+  }
+};
+
+/**
+ * Starts the cron jobs:
+ * 1. Polls all active accounts every 2 minutes.
+ * 2. Parallel background cleanup of past events every 30 minutes.
  */
 export const startPolling = () => {
-  console.log('Starting poller service...');
+  console.log('Starting poller & parallel background services...');
+
+  // Run initial parallel cleanup on boot
+  cleanupPastEvents(null, 0).catch(err => console.error('Initial cleanup error:', err));
+
+  // Cron 1: Poll inboxes every 2 minutes
   cron.schedule('*/2 * * * *', async () => {
     console.log('Cron triggered: Polling all active accounts');
     try {
@@ -422,6 +467,12 @@ export const startPolling = () => {
     } catch (error) {
       console.error('Error fetching accounts for polling:', error);
     }
+  });
+
+  // Cron 2: Parallel cleanup of past events every 30 minutes
+  cron.schedule('*/30 * * * *', async () => {
+    console.log('[Cleanup Job] Running periodic past event cleanup...');
+    await cleanupPastEvents(null, 0);
   });
 };
 

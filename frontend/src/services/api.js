@@ -33,6 +33,7 @@ export const emailsApi = {
 export const eventsApi = {
   list: (params = { page: 1, limit: 10, status: '' }) => api.get('/events', { params }),
   getStats: () => api.get('/events/stats'),
+  cleanupPast: (daysOld = 0) => api.post('/events/cleanup-past', null, { params: { daysOld } }),
   addToCalendar: (id) => api.post(`/events/${id}/add-to-calendar`),
   update: (id, data) => api.put(`/events/${id}`, data),
   delete: (id) => api.delete(`/events/${id}`),

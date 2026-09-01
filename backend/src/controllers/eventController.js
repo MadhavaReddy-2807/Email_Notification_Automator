@@ -213,3 +213,22 @@ export const deleteEvent = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to delete event' });
   }
 };
+
+/**
+ * Prunes past events that have already ended for the current user
+ */
+export const cleanupPastEventsController = async (req, res) => {
+  try {
+    const daysOld = parseInt(req.query.daysOld) || 0;
+    const { cleanupPastEvents } = await import('../services/pollerService.js');
+    const result = await cleanupPastEvents(req.user._id, daysOld);
+    res.status(200).json({
+      success: true,
+      message: `Cleaned up ${result.deletedCount} past event(s) from database`,
+      data: result
+    });
+  } catch (error) {
+    console.error('Error in cleanupPastEventsController:', error);
+    res.status(500).json({ success: false, error: 'Failed to clean up past events' });
+  }
+};
