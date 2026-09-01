@@ -208,13 +208,6 @@ export const createEvent = async (user, eventData) => {
         fullDescription += `\n\n👤 Organizer: ${eventData.organizer}`;
     }
 
-    console.log(`\n🗓️ [Google Calendar Insert Payload]`);
-    console.log(`   Summary:  "${eventData.title}"`);
-    console.log(`   Timezone: "${timeZone}"`);
-    console.log(`   Start:    ${JSON.stringify(start)}`);
-    console.log(`   End:      ${JSON.stringify(end)}`);
-    console.log(`-----------------------------------------------\n`);
-
     const userEmail = user.email || (user.accounts && user.accounts[0]?.email);
 
     const event = {
