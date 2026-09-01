@@ -256,7 +256,11 @@ export const pollAccount = async (account, fullInboxScan = false) => {
         if (processedThread) {
           const threadData = await getThread(gmailClient, threadId);
           if (!threadData || !threadData.messages) {
-            continue; // Thread was deleted or moved
+            // Thread was deleted or moved - mark processed so it is never re-polled
+            processedThread.lastMessageId = msg.id;
+            processedThread.lastProcessedAt = new Date();
+            await processedThread.save();
+            continue;
           }
           parsedMessages = threadData.messages.map(parseEmailContent);
           latestParsedMessage = parsedMessages[parsedMessages.length - 1] || parsedMessages[0] || {};
@@ -264,7 +268,22 @@ export const pollAccount = async (account, fullInboxScan = false) => {
         } else {
           const messageData = await getMessage(gmailClient, msg.id);
           if (!messageData) {
-            continue; // Message was deleted or moved
+            // Message was deleted or moved - save to ProcessedThread so it is never checked again
+            await ProcessedThread.findOneAndUpdate(
+              { accountId: account._id, gmailThreadId: threadId },
+              {
+                $set: {
+                  userId: user._id,
+                  lastMessageId: msg.id,
+                  lastProcessedAt: new Date(),
+                  status: 'no_event',
+                  threadSnippet: 'Deleted Message'
+                },
+                $setOnInsert: { firstProcessedAt: new Date(), messageCount: 1 }
+              },
+              { upsert: true, new: true }
+            );
+            continue;
           }
           latestParsedMessage = parseEmailContent(messageData);
           parsedSubject = latestParsedMessage.subject || 'No Subject';
