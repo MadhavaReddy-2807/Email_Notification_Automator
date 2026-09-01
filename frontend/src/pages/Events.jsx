@@ -109,14 +109,22 @@ const Events = () => {
     }
   };
 
+  const toLocalInputString = (dateObj) => {
+    if (!dateObj) return '';
+    const d = new Date(dateObj);
+    if (isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const openEditModal = (event) => {
     setEditingEvent(event);
     setEditForm({
       title: event.title || '',
       description: event.description || '',
       location: event.location || '',
-      startTime: event.startTime ? new Date(event.startTime).toISOString().slice(0, 16) : '',
-      endTime: event.endTime ? new Date(event.endTime).toISOString().slice(0, 16) : '',
+      startTime: toLocalInputString(event.startTime),
+      endTime: toLocalInputString(event.endTime),
     });
   };
 

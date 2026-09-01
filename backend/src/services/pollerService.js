@@ -9,12 +9,34 @@ import Event from '../models/Event.js';
 
 
 /**
- * Safely parses event date and time strings into guaranteed valid JavaScript Date objects.
- * Handles missing endTime, various time string formats, and defaults cleanly.
+ * Helper to construct a Date object from a local date/time string in a specific timezone
+ * @param {string} localIsoString - e.g. "2026-09-01T12:30:00"
+ * @param {string} timeZone - e.g. "Asia/Kolkata"
+ * @returns {Date}
+ */
+export const createDateInTimezone = (localIsoString, timeZone = 'Asia/Kolkata') => {
+  const clean = localIsoString.replace(/Z$/i, '').replace(/[+-]\d{2}:\d{2}$/, '');
+  if (!timeZone || timeZone === 'Asia/Kolkata' || timeZone === 'IST') {
+    return new Date(`${clean}+05:30`);
+  }
+  try {
+    const tempDate = new Date(`${clean}Z`);
+    const invDate = new Date(tempDate.toLocaleString('en-US', { timeZone }));
+    const diff = tempDate.getTime() - invDate.getTime();
+    return new Date(tempDate.getTime() + diff);
+  } catch (e) {
+    return new Date(`${clean}+05:30`);
+  }
+};
+
+/**
+ * Safely parses event date and time strings into guaranteed valid JavaScript Date objects
+ * aligned with the target timezone (defaults to Asia/Kolkata).
  * @param {Object} eventData - { date, startTime, endTime }
+ * @param {string} [timeZone] - e.g. 'Asia/Kolkata'
  * @returns {{ start: Date, end: Date }}
  */
-export const parseEventDates = (eventData = {}) => {
+export const parseEventDates = (eventData = {}, timeZone = 'Asia/Kolkata') => {
   const { date, startTime, endTime } = eventData;
   const now = new Date();
 
@@ -24,13 +46,26 @@ export const parseEventDates = (eventData = {}) => {
     datePart = now.toISOString().split('T')[0];
   }
 
-  const parseTime = (timeStr, defaultHours = 9) => {
+  const parseTimeToDate = (timeStr, defaultHours = 9) => {
     if (!timeStr || typeof timeStr !== 'string') {
-      const fallback = new Date(`${datePart}T00:00:00`);
-      fallback.setHours(defaultHours, 0, 0, 0);
-      return fallback;
+      const formatted = `${datePart}T${String(defaultHours).padStart(2, '0')}:00:00`;
+      return createDateInTimezone(formatted, timeZone);
     }
     const trimmed = timeStr.trim();
+
+    // 12-hour or 24-hour time matching (e.g., "12:30", "12:30 PM", "12:30pm", "14:30", "2:30 PM", "9:00 AM", "18:00:00")
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (match) {
+      let hours = parseInt(match[1], 10);
+      const minutes = parseInt(match[2], 10);
+      const seconds = match[3] ? parseInt(match[3], 10) : 0;
+      const ampm = match[4]?.toLowerCase();
+      if (ampm === 'pm' && hours < 12) hours += 12;
+      if (ampm === 'am' && hours === 12) hours = 0;
+
+      const formatted = `${datePart}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+      return createDateInTimezone(formatted, timeZone);
+    }
 
     // Direct ISO / full date-time check
     if (trimmed.includes('T') || trimmed.endsWith('Z')) {
@@ -38,31 +73,11 @@ export const parseEventDates = (eventData = {}) => {
       if (!isNaN(parsed.getTime())) return parsed;
     }
 
-    // 12-hour or 24-hour time matching (e.g., "14:30", "2:30 PM", "9:00 AM", "18:00:00")
-    const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
-    if (match) {
-      let hours = parseInt(match[1], 10);
-      const minutes = parseInt(match[2], 10);
-      const ampm = match[4]?.toLowerCase();
-      if (ampm === 'pm' && hours < 12) hours += 12;
-      if (ampm === 'am' && hours === 12) hours = 0;
-
-      const d = new Date(`${datePart}T00:00:00`);
-      d.setHours(hours, minutes, 0, 0);
-      if (!isNaN(d.getTime())) return d;
-    }
-
-    // Direct string parse with date
-    const direct = new Date(`${datePart}T${trimmed}`);
-    if (!isNaN(direct.getTime())) return direct;
-
-    const fallback = new Date(`${datePart}T00:00:00`);
-    fallback.setHours(defaultHours, 0, 0, 0);
-    return fallback;
+    return createDateInTimezone(`${datePart}T${String(defaultHours).padStart(2, '0')}:00:00`, timeZone);
   };
 
-  const start = parseTime(startTime, 9);
-  let end = endTime ? parseTime(endTime, start.getHours() + 1) : null;
+  const start = parseTimeToDate(startTime, 9);
+  let end = endTime ? parseTimeToDate(endTime, 10) : null;
 
   if (!end || isNaN(end.getTime()) || end <= start) {
     end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration default
@@ -185,11 +200,13 @@ export const pollAccount = async (account, fullInboxScan = false) => {
           continue;
         }
 
+        const userTimeZone = user.settings?.timeZone || 'Asia/Kolkata';
+
         if (aiResponse.action === 'CREATE' && eventsToProcess.length > 0) {
           let lastCreatedEventId = null;
 
           for (const eventItem of eventsToProcess) {
-            const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem);
+            const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem, userTimeZone);
 
             // Guard: Skip events that have already ended/completed in the past
             const now = new Date();
@@ -305,7 +322,7 @@ export const pollAccount = async (account, fullInboxScan = false) => {
 
         } else if (aiResponse.action === 'RESCHEDULE' && existingEvent && eventsToProcess.length > 0) {
           const eventItem = eventsToProcess[0];
-          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem);
+          const { start: fallbackStart, end: fallbackEnd } = parseEventDates(eventItem, userTimeZone);
           let eventStart = fallbackStart;
           let eventEnd = fallbackEnd;
 

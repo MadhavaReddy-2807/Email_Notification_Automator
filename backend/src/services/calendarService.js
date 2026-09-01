@@ -68,17 +68,35 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
     }
 
     if (timeOrDate instanceof Date) {
-        const hours = String(timeOrDate.getHours()).padStart(2, '0');
-        const minutes = String(timeOrDate.getMinutes()).padStart(2, '0');
-        const seconds = String(timeOrDate.getSeconds()).padStart(2, '0');
-        const localIso = `${baseDate}T${hours}:${minutes}:${seconds}`;
+        // Accurately extract local time in targetZone regardless of server timezone
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: targetZone,
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        const parts = formatter.formatToParts(timeOrDate);
+        const getPart = (type) => parts.find(p => p.type === type)?.value || '00';
+        const y = getPart('year');
+        const m = getPart('month');
+        const d = getPart('day');
+        let h = getPart('hour');
+        if (h === '24') h = '00';
+        const min = getPart('minute');
+        const s = getPart('second');
+
+        const localIso = `${y}-${m}-${d}T${h}:${min}:${s}`;
         return { dateTime: localIso, timeZone: targetZone };
     }
 
     if (typeof timeOrDate === 'string') {
         const trimmed = timeOrDate.trim();
 
-        // 12-hour or 24-hour match (e.g., "17:45", "5:45 PM", "09:00", "11:15")
+        // 12-hour or 24-hour match (e.g., "12:30", "12:30 PM", "12:30pm", "17:45", "5:45 PM", "09:00")
         const match = trimmed.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?$/i);
         if (match) {
             let hours = parseInt(match[1], 10);
@@ -94,7 +112,29 @@ export const formatEventTime = (dateStr, timeOrDate, timeZone = 'Asia/Kolkata') 
         }
 
         if (trimmed.includes('T')) {
-            // Strip any trailing Z to prevent Google Calendar from forcing UTC
+            const parsed = new Date(trimmed);
+            if (!isNaN(parsed.getTime())) {
+                const formatter = new Intl.DateTimeFormat('en-CA', {
+                    timeZone: targetZone,
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+                const parts = formatter.formatToParts(parsed);
+                const getPart = (type) => parts.find(p => p.type === type)?.value || '00';
+                const y = getPart('year');
+                const m = getPart('month');
+                const d = getPart('day');
+                let h = getPart('hour');
+                if (h === '24') h = '00';
+                const min = getPart('minute');
+                const s = getPart('second');
+                return { dateTime: `${y}-${m}-${d}T${h}:${min}:${s}`, timeZone: targetZone };
+            }
             const cleanIso = trimmed.replace(/Z$/i, '');
             return { dateTime: cleanIso, timeZone: targetZone };
         }
