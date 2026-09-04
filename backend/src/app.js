@@ -59,6 +59,11 @@ app.use('/api/emails', emailRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/settings', settingRoutes);
 
+// Root endpoint (prevents 404 for uptime monitors pinging root URL)
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Email Notification Automator API is running' });
+});
+
 // Health check route
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
